@@ -58,24 +58,27 @@ STATIONS = [
 # plus tard avec Météo-France / Infoclimat. Ex : {"Orange": {"t": -0.5}}
 CORRECTIONS = {}
 
-# Pictos : dossier d'icônes meteoblue (à télécharger vous-même, voir note licence).
+# Pictos meteoblue (jeu "day", 35 codes) : fichiers NN_day*.png dans ce dossier.
 ICON_DIR = Path("icons")
-ICONS = {  # catégorie interne -> (fichier, emoji de secours, libellé)
-    "ensoleille":    ("01.svg", "☀️", "Ensoleillé"),
-    "peu_nuageux":   ("02.svg", "🌤️", "Peu nuageux"),
-    "partiel":       ("03.svg", "⛅", "Partiellement nuageux"),
-    "nuageux":       ("04.svg", "🌥️", "Très nuageux"),
-    "couvert":       ("05.svg", "☁️", "Couvert"),
-    "brouillard":    ("06.svg", "🌫️", "Brouillard"),
-    "pluie_faible":  ("07.svg", "🌦️", "Pluie faible"),
-    "averses":       ("08.svg", "🌦️", "Averses"),
-    "pluie":         ("09.svg", "🌧️", "Pluie"),
-    "orage":         ("10.svg", "⛈️", "Orageux"),
-    "neige":         ("11.svg", "🌨️", "Neige"),
+PICTO_FR = {
+    1: "Ciel dégagé", 2: "Dégagé, quelques cirrus", 3: "Dégagé avec cirrus",
+    4: "Dégagé, quelques nuages bas", 5: "Dégagé, nuages bas et quelques cirrus",
+    6: "Dégagé, nuages bas et cirrus", 7: "Partiellement nuageux",
+    8: "Partiellement nuageux, quelques cirrus", 9: "Partiellement nuageux avec cirrus",
+    10: "Mitigé, risque orageux", 11: "Mitigé, quelques cirrus, risque orageux",
+    12: "Mitigé avec cirrus, risque orageux", 13: "Dégagé mais brumeux",
+    14: "Brumeux, quelques cirrus", 15: "Brumeux avec cirrus",
+    16: "Brouillard / stratus bas", 17: "Brouillard, quelques cirrus", 18: "Brouillard avec cirrus",
+    19: "Très nuageux", 20: "Très nuageux, quelques cirrus", 21: "Très nuageux avec cirrus",
+    22: "Couvert", 23: "Couvert, pluie", 24: "Couvert, neige", 25: "Couvert, forte pluie",
+    26: "Couvert, forte neige", 27: "Pluie, orages probables", 28: "Pluie faible, orages probables",
+    29: "Orage, forte neige", 30: "Forte pluie, orages probables", 31: "Mitigé, averses",
+    32: "Mitigé, averses de neige", 33: "Couvert, pluie faible", 34: "Couvert, neige faible",
+    35: "Couvert, pluie et neige mêlées",
 }
 
-HOURLY = ["temperature_2m", "wind_gusts_10m", "wind_speed_10m",
-          "wind_direction_10m", "precipitation", "cloud_cover", "weather_code"]
+HOURLY = ["temperature_2m", "wind_gusts_10m", "wind_speed_10m", "wind_direction_10m",
+          "precipitation", "cloud_cover", "cloud_cover_low", "cloud_cover_high", "weather_code"]
 
 # ------------------------------------------------------------ OUTILS ------
 def rnd(x):                      # arrondi "commercial" (0,5 -> haut)
@@ -126,6 +129,8 @@ def demo_data():
             h[f"wind_direction_10m_{m}"] = [(300 + random.uniform(-30, 30)) % 360 for _ in times]
             h[f"precipitation_{m}"] = [max(0, random.uniform(-1.5, 1.5)) if math.sin(i / 7 + ph) > 0.6 else 0 for i in range(len(times))]
             h[f"cloud_cover_{m}"] = [min(100, max(0, 50 + 50 * math.sin(i / 9 + ph))) for i in range(len(times))]
+            h[f"cloud_cover_low_{m}"] = [random.uniform(0, 40) for _ in times]
+            h[f"cloud_cover_high_{m}"] = [random.uniform(0, 60) for _ in times]
             h[f"weather_code_{m}"] = [random.choice([0, 1, 2, 3, 61, 80, 95]) for _ in times]
         out.append({"hourly": h})
     return out
@@ -174,29 +179,54 @@ class Station:
 
 # ------------------------------------------------------------ CALCULS -----
 def picto(st, t0, t1):
-    """Catégorie de temps global sur [t0 ; t1] (approximation, voir note)."""
+    """Code meteoblue (1-35, jeu "day") pour la fenêtre [t0 ; t1].
+    Heuristique maison (nébulosité totale/basse/haute, cumul de pluie, codes météo des modèles)."""
     hrs = list(frange(t0, t1))
-    clouds = [c for t in hrs if (c := st.mean("cloud_cover", t)) is not None]
-    precip = sum(p for t in hrs[1:] if (p := st.mean("precipitation", t)) is not None)
-    codes = [c for t in hrs for c in st.codes(t)]
+
+    def avg(v, default):
+        xs = [x for t in hrs if (x := st.mean(v, t)) is not None]
+        return sum(xs) / len(xs) if xs else default
+
+    cc, cl, ch = avg("cloud_cover", 50), avg("cloud_cover_low", 0), avg("cloud_cover_high", 0)
+    p = sum(x for t in hrs[1:] if (x := st.mean("precipitation", t)) is not None)
     temps = [x for t in hrs if (x := st.mean("temperature_2m", t)) is not None]
-    cc = sum(clouds) / len(clouds) if clouds else 50
+    codes = [c for t in hrs for c in st.codes(t)]
+
+    def cir(a, b):                       # 0 = rien, 1 = quelques cirrus, 2 = cirrus
+        return 0 if ch < a else 1 if ch < b else 2
+
     thunder = any(c in (95, 96, 99) for c in codes)
-    snow = any(c in (71, 73, 75, 77, 85, 86) for c in codes) or (precip > 0.2 and temps and max(temps) < 1)
-    fog = sum(c in (45, 48) for c in codes) > len(codes) / 2 if codes else False
-    shower = any(c in (80, 81, 82) for c in codes)
-    if thunder and precip > 0.1: return "orage"
-    if snow and precip > 0.2: return "neige"
-    if precip >= 4: return "pluie"
-    if precip >= 0.5:
-        return "averses" if (shower or cc < 80) else "pluie"
-    if precip >= 0.2: return "pluie_faible"
-    if fog: return "brouillard"
-    if cc < 12: return "ensoleille"
-    if cc < 37: return "peu_nuageux"
-    if cc < 62: return "partiel"
-    if cc < 87: return "nuageux"
-    return "couvert"
+    snow_code = any(c in (71, 73, 75, 77, 85, 86) for c in codes)
+    rain_code = any(c in (51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82) for c in codes)
+    wet = p >= 0.3
+    snow = snow_code or (wet and temps and max(temps) < 1.0)
+    shower = any(c in (80, 81, 82, 85, 86) for c in codes) or (wet and cc < 85)
+    fog = bool(codes) and sum(c in (45, 48) for c in codes) > len(codes) / 2
+
+    # Précipitations / orages (prioritaires)
+    if thunder and wet:
+        return 29 if snow else 30 if p >= 8 else 27 if p >= 1.5 else 28
+    if thunder:
+        return 10 + cir(10, 30)
+    if wet and snow:
+        if snow_code and rain_code and p >= 0.5: return 35
+        if shower: return 32
+        return 26 if p >= 6 else 24 if p >= 1 else 34
+    if wet:
+        if shower: return 31
+        return 25 if p >= 10 else 23 if p >= 1.5 else 33
+    # Brouillard
+    if fog:
+        return 16 + cir(5, 15)
+    # Ciel
+    if cc < 20:
+        base = {(0, 0): 1, (0, 1): 2, (0, 2): 3, (1, 0): 4, (1, 1): 5, (1, 2): 6}
+        return base[(1 if cl >= 5 else 0, cir(5, 12))]
+    if cc < 55:
+        return 7 + cir(10, 30)
+    if cc < 85:
+        return 19 + cir(10, 30)
+    return 22
 
 def compute(st, d):
     corr = CORRECTIONS.get(st.name, {})
@@ -236,9 +266,14 @@ DIR_FR = {"N": "nord", "NNE": "nord-nord-est", "NE": "nord-est", "ENE": "est-nor
           "E": "est", "ESE": "est-sud-est", "SE": "sud-est", "SSE": "sud-sud-est",
           "S": "sud", "SSO": "sud-sud-ouest", "SO": "sud-ouest", "OSO": "ouest-sud-ouest",
           "O": "ouest", "ONO": "ouest-nord-ouest", "NO": "nord-ouest", "NNO": "nord-nord-ouest"}
-SKY_IDX = {"ensoleille": 0, "peu_nuageux": 1, "partiel": 2, "nuageux": 3, "couvert": 4}
+SKY_OF = {**{c: 0 for c in (1, 2, 3)}, **{c: 1 for c in (4, 5, 6, 13, 14, 15)},
+          **{c: 2 for c in (7, 8, 9, 10, 11, 12)}, 19: 3, 20: 3, 21: 3, 22: 4}
+FOG = {16, 17, 18}
+THUNDER = {27, 28, 29, 30}
+THUNDER_RISK = {10, 11, 12}
+SNOW = {24, 26, 29, 32, 34, 35}
 SKY_TXT = ["ensoleillé", "peu nuageux", "partiellement nuageux", "très nuageux", "couvert"]
-WET = {"pluie_faible", "averses", "pluie", "orage", "neige"}
+WET = set(range(23, 36))
 MOMENTS = ["le matin", "à midi", "l'après-midi"]
 
 def liste(noms, n=4):
@@ -263,9 +298,9 @@ def bulletin(rows):
     desc = []
     for i in range(len(ECHEANCES)):
         cats = [r["ech"][i]["picto"] for _, r in R]
-        sec = [SKY_IDX[c] for c in cats if c in SKY_IDX]
+        sec = [SKY_OF[c] for c in cats if c in SKY_OF]
         wet = sum(c in WET for c in cats)
-        fog = sum(c == "brouillard" for c in cats)
+        fog = sum(c in FOG for c in cats)
         if wet >= N / 2:
             desc.append("pluvieux")
         elif fog >= N / 3:
@@ -282,8 +317,8 @@ def bulletin(rows):
     # --- Précipitations
     rr_max_n, rr_max = max(((n, r["rr"]) for n, r in R), key=lambda x: x[1])
     wet_st = [n for n, r in R if r["rr"] >= 1.0]
-    orage_st = [n for n, r in R if any(e["picto"] == "orage" for e in r["ech"])]
-    neige_st = [n for n, r in R if any(e["picto"] == "neige" for e in r["ech"])]
+    orage_st = [n for n, r in R if any(e["picto"] in THUNDER | THUNDER_RISK for e in r["ech"])]
+    neige_st = [n for n, r in R if any(e["picto"] in SNOW for e in r["ech"])]
     if wet_st:
         par_ech = [sum(r["ech"][i]["picto"] in WET for _, r in R) for i in range(len(ECHEANCES))]
         i_max = par_ech.index(max(par_ech))
@@ -338,10 +373,15 @@ JOURS = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"
 MOIS = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août",
         "septembre", "octobre", "novembre", "décembre"]
 
-def icon_html(cat):
-    f, emo, lab = ICONS[cat]
-    if (ICON_DIR / f).exists():
-        return f'<img src="{ICON_DIR}/{f}" alt="{lab}" title="{lab}" class="pic">'
+def icon_html(code):
+    lab = PICTO_FR.get(code, "")
+    f = next(iter(sorted(ICON_DIR.glob(f"{code:02d}_day*.png"))), None) if ICON_DIR.exists() else None
+    if f:
+        return f'<img src="{ICON_DIR.name}/{f.name}" alt="{lab}" title="{lab}" class="pic">'
+    emo = ("🌫️" if code in FOG else "⛈️" if code in THUNDER else "🌨️" if code in SNOW
+           else "🌧️" if code in WET and code != 31 else "🌦️" if code == 31
+           else "☀️" if SKY_OF.get(code, 2) == 0 else "⛅" if SKY_OF.get(code, 2) == 2
+           else "🌥️" if SKY_OF.get(code) == 3 else "☁️" if code == 22 else "🌤️")
     return f'<span class="emo" title="{lab}">{emo}</span>'
 
 def wind_cell(g, d):
@@ -393,7 +433,7 @@ tbody tr:hover td{{background:rgba(79,195,247,.12)}}
 td.c{{border-left:2px solid var(--line)}}
 td.x{{background:rgba(0,0,0,.18)}} td.tn{{border-left:2px solid var(--acc);color:#7fd4ff}} td.tx{{color:#ffb074}}
 td.rr{{color:#9ad0ff}}
-.pic{{height:32px;vertical-align:middle}} .emo{{font-size:24px;line-height:1;vertical-align:middle}}
+.pic{{height:34px;border-radius:6px;vertical-align:middle}} .emo{{font-size:24px;line-height:1;vertical-align:middle}}
 td b{{font-size:15px}} small{{color:var(--mut);font-size:10px}} i{{font-style:normal;color:var(--acc);font-size:12px;margin-left:2px}}
 .w1 b{{color:#ffe082}} .w2 b{{color:#ffab40}} .w3 b{{color:#ff6e6e}}
 td.g{{text-align:left;min-width:92px}}
@@ -417,7 +457,7 @@ footer{{color:var(--mut);font-size:11px;margin-top:8px;line-height:1.5}}
 </section>
 <footer>Échéances en heure locale · Tn : 18 h UTC veille → 18 h UTC · Tx : 6 h → 18 h UTC ·
 Pluie et rafale max : 18 h UTC veille → 18 h UTC · Rafales : <span class="w1"><b>≥40</b></span> <span class="w2"><b>≥60</b></span> <span class="w3"><b>≥80</b></span> km/h ·
-Prévisions brutes de modèles, non corrigées.</footer>
+Pictogrammes © <a style="color:var(--acc)" href="https://content.meteoblue.com/en/research-education/specifications/standards/symbols-and-pictograms">meteoblue</a> · Prévisions brutes de modèles, non corrigées.</footer>
 </body></html>"""
 
 # ------------------------------------------------------------ MAIN --------
