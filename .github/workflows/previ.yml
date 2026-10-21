@@ -29,8 +29,14 @@ jobs:
       - name: Générer la page
         run: |
           mkdir -p site
+          ls -la
           python previ.py --out site/index.html
           if [ -d icons ]; then cp -r icons site/icons; fi
+      - name: Vérifier le contenu publié
+        run: |
+          echo "Contenu du dossier site :"
+          ls -la site
+          test -s site/index.html || (echo "ERREUR : site/index.html est absent ou vide" && exit 1)
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
