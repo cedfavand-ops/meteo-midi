@@ -1,0 +1,443 @@
+#!/usr/bin/env python3
+"""
+Prévisions J+1 Gard / Basse Vallée du Rhône
+Moyenne 50/50 AROME HD + ICON-CH1 (via Open-Meteo) -> page HTML unique.
+
+Usage :
+    python3 previ.py                 # demain (date locale), écrit previ.html
+    python3 previ.py --date 2026-10-22
+    python3 previ.py --demo          # données synthétiques (test de mise en page)
+
+Cron conseillé (17h45 locale) :
+    45 17 * * *  cd /chemin/previ_gard && python3 previ.py
+"""
+import argparse, json, math, random, urllib.parse, urllib.request
+from datetime import datetime, date, timedelta, timezone
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+# ----------------------------------------------------------------- CONFIG --
+PARIS, UTC = ZoneInfo("Europe/Paris"), timezone.utc
+
+MODELS = {                       # nom Open-Meteo : poids
+    "meteofrance_arome_france_hd": 0.5,
+    "meteoswiss_icon_ch1": 0.5,
+}
+
+# Échéances : (libellé, heure locale, fenêtre picto en heures locales)
+ECHEANCES = [("8h", 8, (6, 10)), ("12h", 12, (10, 14)), ("16h", 16, (14, 18))]
+
+# Fenêtres "climato" en UTC, jour J = [18h UTC J-1 ; 18h UTC J]
+TN_START_UTC, TN_END_UTC = 18, 18      # veille 18h -> jour 18h
+TX_START_UTC, TX_END_UTC = 6, 18       # jour J 6h -> 18h
+
+# (nom, latitude, longitude) -- coordonnées approximatives, à affiner
+STATIONS = [
+    ("Montjoyer",        44.4970, 4.7640),
+    ("Donzère",          44.4425, 4.7058),
+    ("Pierrelatte",      44.3775, 4.6985),
+    ("Pont-St-Esprit",   44.2564, 4.6444),
+    ("Bagnols/Cèze",     44.1618, 4.6194),
+    ("Orange",           44.1383, 4.8089),
+    ("Laudun",           44.1000, 4.6800),
+    ("Sabran",           44.1700, 4.5200),
+    ("Roquemaure",       44.0500, 4.7750),
+    ("Pouzilhac",        44.0200, 4.5400),
+    ("Remoulins",        43.9378, 4.5636),
+    ("Avignon",          43.9493, 4.8055),
+    ("Beaucaire",        43.8070, 4.6430),
+    ("Nîmes",            43.8367, 4.3601),
+    ("Uzès",             44.0120, 4.4196),
+    ("Verfeuil",         44.1900, 4.4500),
+    ("Lussan",           44.2200, 4.2800),
+    ("Barjac",           44.3050, 4.3570),
+    ("Alès",             44.1250, 4.0830),
+]
+
+# Mode correctif (phase 2) : biais à retrancher/ajouter par station (°C), à alimenter
+# plus tard avec Météo-France / Infoclimat. Ex : {"Orange": {"t": -0.5}}
+CORRECTIONS = {}
+
+# Pictos : dossier d'icônes meteoblue (à télécharger vous-même, voir note licence).
+ICON_DIR = Path("icons")
+ICONS = {  # catégorie interne -> (fichier, emoji de secours, libellé)
+    "ensoleille":    ("01.svg", "☀️", "Ensoleillé"),
+    "peu_nuageux":   ("02.svg", "🌤️", "Peu nuageux"),
+    "partiel":       ("03.svg", "⛅", "Partiellement nuageux"),
+    "nuageux":       ("04.svg", "🌥️", "Très nuageux"),
+    "couvert":       ("05.svg", "☁️", "Couvert"),
+    "brouillard":    ("06.svg", "🌫️", "Brouillard"),
+    "pluie_faible":  ("07.svg", "🌦️", "Pluie faible"),
+    "averses":       ("08.svg", "🌦️", "Averses"),
+    "pluie":         ("09.svg", "🌧️", "Pluie"),
+    "orage":         ("10.svg", "⛈️", "Orageux"),
+    "neige":         ("11.svg", "🌨️", "Neige"),
+}
+
+HOURLY = ["temperature_2m", "wind_gusts_10m", "wind_speed_10m",
+          "wind_direction_10m", "precipitation", "cloud_cover", "weather_code"]
+
+# ------------------------------------------------------------ OUTILS ------
+def rnd(x):                      # arrondi "commercial" (0,5 -> haut)
+    return None if x is None else int(math.floor(x + 0.5))
+
+def compass(deg):
+    pts = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
+           "S", "SSO", "SO", "OSO", "O", "ONO", "NO", "NNO"]
+    return pts[int((deg % 360) / 22.5 + 0.5) % 16]
+
+def loc_to_utc(d, hour):
+    return datetime(d.year, d.month, d.day, hour, tzinfo=PARIS).astimezone(UTC).replace(tzinfo=None)
+
+def utc_dt(d, hour):
+    return datetime(d.year, d.month, d.day, hour)
+
+def frange(a, b):                # heures de a à b inclus, pas 1h
+    t = a
+    while t <= b:
+        yield t
+        t += timedelta(hours=1)
+
+# ------------------------------------------------------------ DONNÉES -----
+def fetch():
+    params = {
+        "latitude": ",".join(str(s[1]) for s in STATIONS),
+        "longitude": ",".join(str(s[2]) for s in STATIONS),
+        "hourly": ",".join(HOURLY),
+        "models": ",".join(MODELS),
+        "timezone": "UTC", "past_days": 1, "forecast_days": 4,
+        "wind_speed_unit": "kmh",
+    }
+    url = "https://api.open-meteo.com/v1/forecast?" + urllib.parse.urlencode(params)
+    with urllib.request.urlopen(url, timeout=60) as r:
+        data = json.load(r)
+    return data if isinstance(data, list) else [data]
+
+def demo_data():
+    out, base = [], datetime.now(UTC).replace(tzinfo=None, hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
+    times = [(base + timedelta(hours=i)).strftime("%Y-%m-%dT%H:%M") for i in range(24 * 5)]
+    for _ in STATIONS:
+        h = {"time": times}
+        for m in MODELS:
+            ph = random.uniform(0, 6)
+            h[f"temperature_2m_{m}"] = [12 + 7 * math.sin((i - 9) / 24 * 2 * math.pi) + random.uniform(-1, 1) for i in range(len(times))]
+            h[f"wind_gusts_10m_{m}"] = [random.uniform(15, 70) for _ in times]
+            h[f"wind_speed_10m_{m}"] = [random.uniform(5, 40) for _ in times]
+            h[f"wind_direction_10m_{m}"] = [(300 + random.uniform(-30, 30)) % 360 for _ in times]
+            h[f"precipitation_{m}"] = [max(0, random.uniform(-1.5, 1.5)) if math.sin(i / 7 + ph) > 0.6 else 0 for i in range(len(times))]
+            h[f"cloud_cover_{m}"] = [min(100, max(0, 50 + 50 * math.sin(i / 9 + ph))) for i in range(len(times))]
+            h[f"weather_code_{m}"] = [random.choice([0, 1, 2, 3, 61, 80, 95]) for _ in times]
+        out.append({"hourly": h})
+    return out
+
+class Station:
+    """Séries horaires (UTC) par modèle + fonctions de fusion pondérée."""
+    def __init__(self, name, payload):
+        self.name = name
+        h = payload["hourly"]
+        times = [datetime.strptime(t, "%Y-%m-%dT%H:%M") for t in h["time"]]
+        self.series = {}
+        for v in HOURLY:
+            for m in MODELS:
+                arr = h.get(f"{v}_{m}")
+                if arr is None and len(MODELS) == 1:
+                    arr = h.get(v)
+                if arr:
+                    self.series[(v, m)] = {t: x for t, x in zip(times, arr) if x is not None}
+        self.models_used = sorted({m for (v, m), s in self.series.items()
+                                   if v == "temperature_2m" and s})
+
+    def raw(self, v, m, t):
+        return self.series.get((v, m), {}).get(t)
+
+    def mean(self, v, t):
+        num = den = 0.0
+        for m, w in MODELS.items():
+            x = self.raw(v, m, t)
+            if x is not None:
+                num += w * x; den += w
+        return num / den if den else None
+
+    def direction(self, t):
+        """Moyenne vectorielle pondérée par vitesse et par poids de modèle."""
+        u = v = 0.0; ok = False
+        for m, w in MODELS.items():
+            d, s = self.raw("wind_direction_10m", m, t), self.raw("wind_speed_10m", m, t)
+            if d is None:
+                continue
+            s = s if s else 1.0
+            u += w * s * math.sin(math.radians(d)); v += w * s * math.cos(math.radians(d)); ok = True
+        return (math.degrees(math.atan2(u, v)) % 360) if ok else None
+
+    def codes(self, t):
+        return [c for m in MODELS if (c := self.raw("weather_code", m, t)) is not None]
+
+# ------------------------------------------------------------ CALCULS -----
+def picto(st, t0, t1):
+    """Catégorie de temps global sur [t0 ; t1] (approximation, voir note)."""
+    hrs = list(frange(t0, t1))
+    clouds = [c for t in hrs if (c := st.mean("cloud_cover", t)) is not None]
+    precip = sum(p for t in hrs[1:] if (p := st.mean("precipitation", t)) is not None)
+    codes = [c for t in hrs for c in st.codes(t)]
+    temps = [x for t in hrs if (x := st.mean("temperature_2m", t)) is not None]
+    cc = sum(clouds) / len(clouds) if clouds else 50
+    thunder = any(c in (95, 96, 99) for c in codes)
+    snow = any(c in (71, 73, 75, 77, 85, 86) for c in codes) or (precip > 0.2 and temps and max(temps) < 1)
+    fog = sum(c in (45, 48) for c in codes) > len(codes) / 2 if codes else False
+    shower = any(c in (80, 81, 82) for c in codes)
+    if thunder and precip > 0.1: return "orage"
+    if snow and precip > 0.2: return "neige"
+    if precip >= 4: return "pluie"
+    if precip >= 0.5:
+        return "averses" if (shower or cc < 80) else "pluie"
+    if precip >= 0.2: return "pluie_faible"
+    if fog: return "brouillard"
+    if cc < 12: return "ensoleille"
+    if cc < 37: return "peu_nuageux"
+    if cc < 62: return "partiel"
+    if cc < 87: return "nuageux"
+    return "couvert"
+
+def compute(st, d):
+    corr = CORRECTIONS.get(st.name, {})
+    dt = corr.get("t", 0.0)
+    res = {"ech": []}
+    for label, hloc, (a, b) in ECHEANCES:
+        t = loc_to_utc(d, hloc)
+        temp = st.mean("temperature_2m", t)
+        gust = st.mean("wind_gusts_10m", t)
+        # rafale/dir sur la tranche +-1h pour ne pas rater un pic ponctuel
+        gmax = max([g for k in (-1, 0, 1) if (g := st.mean("wind_gusts_10m", t + timedelta(hours=k))) is not None], default=gust)
+        res["ech"].append({
+            "label": label,
+            "t": rnd(temp + dt) if temp is not None else None,
+            "gust": rnd(gmax), "dir": st.direction(t),
+            "picto": picto(st, loc_to_utc(d, a), loc_to_utc(d, b)),
+        })
+    s_tn, e_tn = utc_dt(d - timedelta(days=1), TN_START_UTC), utc_dt(d, TN_END_UTC)
+    temps = [x for t in frange(s_tn, e_tn) if (x := st.mean("temperature_2m", t)) is not None]
+    tx_t = [x for t in frange(utc_dt(d, TX_START_UTC), utc_dt(d, TX_END_UTC)) if (x := st.mean("temperature_2m", t)) is not None]
+    res["tn"] = rnd(min(temps) + dt) if temps else None
+    res["tx"] = rnd(max(tx_t) + dt) if tx_t else None
+    # précip : l'échéance horaire h cumule (h-1 ; h]
+    res["rr"] = sum(p for t in frange(s_tn + timedelta(hours=1), e_tn) if (p := st.mean("precipitation", t)) is not None)
+    gs = [g for t in frange(s_tn + timedelta(hours=1), e_tn) if (g := st.mean("wind_gusts_10m", t)) is not None]
+    res["gmax"] = rnd(max(gs)) if gs else None
+    res["gmax_dir"] = None
+    if gs:
+        tmax = max((t for t in frange(s_tn + timedelta(hours=1), e_tn) if st.mean("wind_gusts_10m", t) is not None),
+                   key=lambda t: st.mean("wind_gusts_10m", t))
+        res["gmax_dir"] = st.direction(tmax)
+    res["models"] = len(st.models_used)
+    return res
+
+# ------------------------------------------------------------ BULLETIN ----
+DIR_FR = {"N": "nord", "NNE": "nord-nord-est", "NE": "nord-est", "ENE": "est-nord-est",
+          "E": "est", "ESE": "est-sud-est", "SE": "sud-est", "SSE": "sud-sud-est",
+          "S": "sud", "SSO": "sud-sud-ouest", "SO": "sud-ouest", "OSO": "ouest-sud-ouest",
+          "O": "ouest", "ONO": "ouest-nord-ouest", "NO": "nord-ouest", "NNO": "nord-nord-ouest"}
+SKY_IDX = {"ensoleille": 0, "peu_nuageux": 1, "partiel": 2, "nuageux": 3, "couvert": 4}
+SKY_TXT = ["ensoleillé", "peu nuageux", "partiellement nuageux", "très nuageux", "couvert"]
+WET = {"pluie_faible", "averses", "pluie", "orage", "neige"}
+MOMENTS = ["le matin", "à midi", "l'après-midi"]
+
+def liste(noms, n=4):
+    noms = list(noms)
+    if len(noms) > n:
+        return ", ".join(noms[:n]) + "…"
+    return noms[0] if len(noms) == 1 else ", ".join(noms[:-1]) + " et " + noms[-1]
+
+def vec_dir(pairs):
+    """Direction moyenne (vecteur) de couples (degrés, poids)."""
+    u = sum(w * math.sin(math.radians(d)) for d, w in pairs if d is not None)
+    v = sum(w * math.cos(math.radians(d)) for d, w in pairs if d is not None)
+    return math.degrees(math.atan2(u, v)) % 360 if (u or v) else None
+
+def bulletin(rows):
+    """Quelques phrases de synthèse construites à partir des valeurs du tableau."""
+    R = [(n, r) for n, r, _ in rows]
+    N = len(R)
+    out = []
+
+    # --- Ciel
+    desc = []
+    for i in range(len(ECHEANCES)):
+        cats = [r["ech"][i]["picto"] for _, r in R]
+        sec = [SKY_IDX[c] for c in cats if c in SKY_IDX]
+        wet = sum(c in WET for c in cats)
+        fog = sum(c == "brouillard" for c in cats)
+        if wet >= N / 2:
+            desc.append("pluvieux")
+        elif fog >= N / 3:
+            desc.append("brumeux")
+        elif sec:
+            desc.append(SKY_TXT[min(4, int(sum(sec) / len(sec) + 0.5))])
+        else:
+            desc.append("variable")
+    if len(set(desc)) == 1:
+        out.append(f"<b>Ciel :</b> {desc[0]} toute la journée.")
+    else:
+        out.append("<b>Ciel :</b> " + ", ".join(f"{d} {m}" for d, m in zip(desc, MOMENTS)) + ".")
+
+    # --- Précipitations
+    rr_max_n, rr_max = max(((n, r["rr"]) for n, r in R), key=lambda x: x[1])
+    wet_st = [n for n, r in R if r["rr"] >= 1.0]
+    orage_st = [n for n, r in R if any(e["picto"] == "orage" for e in r["ech"])]
+    neige_st = [n for n, r in R if any(e["picto"] == "neige" for e in r["ech"])]
+    if wet_st:
+        par_ech = [sum(r["ech"][i]["picto"] in WET for _, r in R) for i in range(len(ECHEANCES))]
+        i_max = par_ech.index(max(par_ech))
+        txt = (f"pluie sur {len(wet_st)} commune{'s' if len(wet_st) > 1 else ''} "
+               f"({liste(wet_st)}), surtout {MOMENTS[i_max]}, jusqu'à {str(round(rr_max, 1)).replace('.', ',')} mm "
+               f"à {rr_max_n} sur 24 h.")
+    elif rr_max >= 0.2:
+        txt = (f"quelques gouttes possibles localement (max {str(round(rr_max, 1)).replace('.', ',')} mm "
+               f"à {rr_max_n}).")
+    else:
+        txt = "pas de précipitation significative."
+    if orage_st:
+        txt += f" Risque d'orage : {liste(orage_st)}."
+    if neige_st:
+        txt += f" Neige possible : {liste(neige_st)}."
+    out.append("<b>Précipitations :</b> " + txt)
+
+    # --- Températures
+    tn = [(r["tn"], n) for n, r in R if r["tn"] is not None]
+    tx = [(r["tx"], n) for n, r in R if r["tx"] is not None]
+    if tn and tx:
+        tn_lo, tn_hi = min(tn), max(tn)
+        tx_lo, tx_hi = min(tx), max(tx)
+        moy = rnd(sum(t for t, _ in tx) / len(tx))
+        out.append(f"<b>Températures :</b> minimales de {tn_lo[0]}° ({tn_lo[1]}) à {tn_hi[0]}° ({tn_hi[1]}) ; "
+                   f"maximales de {tx_lo[0]}° ({tx_lo[1]}) à {tx_hi[0]}° ({tx_hi[1]}), "
+                   f"{moy}° en moyenne.")
+
+    # --- Vent
+    g = [(r["gmax"], n, r["gmax_dir"]) for n, r in R if r["gmax"] is not None]
+    if g:
+        gm, gn, _ = max(g)
+        med = sorted(x[0] for x in g)[len(g) // 2]
+        if gm < 30:
+            out.append("<b>Vent :</b> faible, rafales inférieures à 30 km/h.")
+        else:
+            d = vec_dir([(x[2], x[0]) for x in g])
+            nom = DIR_FR[compass(d)] if d is not None else ""
+            mistral = d is not None and (d >= 315 or d <= 22.5) and med >= 50
+            de = "d'" if nom[:1] in "eo" else "de "
+            txt = f"vent {de}{nom}{' (mistral)' if mistral else ''}, rafales courantes de {med} km/h, jusqu'à {gm} km/h à {gn}."
+            fortes = [n for v, n, _ in g if v >= 60]
+            if fortes and len(fortes) < N:
+                txt += f" Rafales ≥ 60 km/h sur {liste(fortes)}."
+            elif len(fortes) == N:
+                txt += " Rafales ≥ 60 km/h sur l'ensemble des communes."
+            out.append("<b>Vent :</b> " + txt)
+    return out
+
+# ------------------------------------------------------------ RENDU -------
+JOURS = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
+MOIS = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août",
+        "septembre", "octobre", "novembre", "décembre"]
+
+def icon_html(cat):
+    f, emo, lab = ICONS[cat]
+    if (ICON_DIR / f).exists():
+        return f'<img src="{ICON_DIR}/{f}" alt="{lab}" title="{lab}" class="pic">'
+    return f'<span class="emo" title="{lab}">{emo}</span>'
+
+def wind_cell(g, d):
+    if g is None: return "–"
+    cls = "w3" if g >= 80 else "w2" if g >= 60 else "w1" if g >= 40 else ""
+    dr = compass(d) if d is not None else ""
+    return f'<span class="{cls}"><b>{g}</b> <small>km/h</small> <i>{dr}</i></span>'
+
+def temp_cell(t):
+    return "–" if t is None else f"<b>{t}°</b>"
+
+def render(rows, d, generated):
+    head = "".join(f'<th colspan="3" class="grp">{e[0]}</th>' for e in ECHEANCES)
+    sub = "".join('<th class="s">Temps</th><th class="s">T°</th><th class="s">Rafales</th>' for _ in ECHEANCES)
+    body = []
+    for name, r, partial in rows:
+        cells = "".join(f'<td class="c">{icon_html(e["picto"])}</td><td>{temp_cell(e["t"])}</td>'
+                        f'<td class="g">{wind_cell(e["gust"], e["dir"])}</td>' for e in r["ech"])
+        mark = ' <sup title="Un seul modèle disponible">*</sup>' if partial else ""
+        rr = f'{r["rr"]:.1f}'.replace(".", ",")
+        body.append(
+            f'<tr><th class="n">{name}{mark}</th>{cells}'
+            f'<td class="x tn">{temp_cell(r["tn"])}</td><td class="x tx">{temp_cell(r["tx"])}</td>'
+            f'<td class="x rr">{rr} <small>mm</small></td>'
+            f'<td class="x g">{wind_cell(r["gmax"], r["gmax_dir"])}</td></tr>')
+    bul = "\n".join(f"<p>{l}</p>" for l in bulletin(rows))
+    titre = f"{JOURS[d.weekday()].capitalize()} {d.day} {MOIS[d.month-1]} {d.year}"
+    return f"""<!DOCTYPE html>
+<html lang="fr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Météo-Midi · {titre}</title>
+<style>
+:root{{--bg:#0b1d3a;--card:#102a52;--row:#143262;--line:#24467d;--txt:#e8f0ff;--mut:#8fa9d6;--acc:#4fc3f7}}
+*{{box-sizing:border-box}}
+body{{margin:0;background:radial-gradient(circle at 20% 0,#14305e,#081530 70%);color:var(--txt);
+font-family:"Segoe UI",Roboto,Helvetica,Arial,sans-serif;padding:14px 18px}}
+header{{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px}}
+h1{{font-size:20px;margin:0;letter-spacing:.5px}} h1 span{{color:var(--acc)}}
+.sub{{color:var(--mut);font-size:12px}}
+.wrap{{overflow-x:auto}}
+table{{width:100%;border-collapse:collapse;font-size:14px;background:var(--card);border-radius:8px;overflow:hidden}}
+th,td{{padding:3px 6px;text-align:center;white-space:nowrap;border-bottom:1px solid var(--line)}}
+thead th{{background:#0a1b38;color:var(--acc);font-weight:600;font-size:13px}}
+thead th.s{{color:var(--mut);font-weight:400;font-size:11px;padding:2px 4px}}
+th.grp{{border-left:2px solid var(--line);font-size:15px}}
+th.n{{text-align:left;font-weight:600;padding-left:10px;background:var(--row);position:sticky;left:0}}
+tbody tr:nth-child(even) td{{background:rgba(255,255,255,.035)}}
+tbody tr:hover td{{background:rgba(79,195,247,.12)}}
+td.c{{border-left:2px solid var(--line)}}
+td.x{{background:rgba(0,0,0,.18)}} td.tn{{border-left:2px solid var(--acc);color:#7fd4ff}} td.tx{{color:#ffb074}}
+td.rr{{color:#9ad0ff}}
+.pic{{height:32px;vertical-align:middle}} .emo{{font-size:24px;line-height:1;vertical-align:middle}}
+td b{{font-size:15px}} small{{color:var(--mut);font-size:10px}} i{{font-style:normal;color:var(--acc);font-size:12px;margin-left:2px}}
+.w1 b{{color:#ffe082}} .w2 b{{color:#ffab40}} .w3 b{{color:#ff6e6e}}
+td.g{{text-align:left;min-width:92px}}
+.bul{{margin-top:12px;background:var(--card);border-left:4px solid var(--acc);border-radius:8px;padding:10px 16px}}.bul h2{{margin:0 0 6px;font-size:14px;color:var(--acc);letter-spacing:.5px;text-transform:uppercase}}.bul p{{margin:3px 0;font-size:14px;line-height:1.45}} .bul b{{color:#fff}}
+footer{{color:var(--mut);font-size:11px;margin-top:8px;line-height:1.5}}
+@media (max-width:900px){{table{{font-size:12px}} .pic{{height:24px}}}}
+</style></head><body>
+<header><h1>Météo-Midi <span>· Prévisions {titre}</span></h1>
+<div class="sub">Moyenne AROME HD / ICON-CH1 (50/50) · édité le {generated}</div></header>
+<div class="wrap"><table>
+<thead>
+<tr><th rowspan="2" class="n">Commune</th>{head}
+<th colspan="4" class="grp">Synthèse 24 h</th></tr>
+<tr>{sub}<th class="s">Tn</th><th class="s">Tx</th><th class="s">Pluie</th><th class="s">Rafale max</th></tr>
+</thead>
+<tbody>
+{chr(10).join(body)}
+</tbody></table></div>
+<section class="bul"><h2>Bulletin</h2>
+{bul}
+</section>
+<footer>Échéances en heure locale · Tn : 18 h UTC veille → 18 h UTC · Tx : 6 h → 18 h UTC ·
+Pluie et rafale max : 18 h UTC veille → 18 h UTC · Rafales : <span class="w1"><b>≥40</b></span> <span class="w2"><b>≥60</b></span> <span class="w3"><b>≥80</b></span> km/h ·
+Prévisions brutes de modèles, non corrigées.</footer>
+</body></html>"""
+
+# ------------------------------------------------------------ MAIN --------
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--date", help="jour prévu AAAA-MM-JJ (défaut : demain)")
+    ap.add_argument("--demo", action="store_true")
+    ap.add_argument("--out", default="previ.html")
+    a = ap.parse_args()
+    d = date.fromisoformat(a.date) if a.date else (datetime.now(PARIS) + timedelta(days=1)).date()
+    payloads = demo_data() if a.demo else fetch()
+    rows = []
+    for (name, _, _), p in zip(STATIONS, payloads):
+        st = Station(name, p)
+        r = compute(st, d)
+        rows.append((name, r, r["models"] < len(MODELS)))
+    html = render(rows, d, datetime.now(PARIS).strftime("%d/%m/%Y %H:%M"))
+    Path(a.out).write_text(html, encoding="utf-8")
+    manquants = [n for n, r, partial in rows if partial]
+    print(f"OK -> {a.out}" + (f" | un seul modèle pour : {', '.join(manquants)}" if manquants else ""))
+
+if __name__ == "__main__":
+    main()
