@@ -478,4 +478,24 @@ Pluie et rafale max : 18 h UTC veille → 18 h UTC · Rafales : <span class="w1"
 Pictogrammes © <a style="color:var(--acc)" href="https://content.meteoblue.com/en/research-education/specifications/standards/symbols-and-pictograms">meteoblue</a> · Prévisions brutes de modèles, non corrigées.</footer>
 </body></html>"""
 
-#
+# ------------------------------------------------------------ MAIN --------
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--date", help="jour prévu AAAA-MM-JJ (défaut : demain)")
+    ap.add_argument("--demo", action="store_true")
+    ap.add_argument("--out", default="previ.html")
+    a = ap.parse_args()
+    d = date.fromisoformat(a.date) if a.date else (datetime.now(PARIS) + timedelta(days=1)).date()
+    payloads = demo_data() if a.demo else fetch(d)
+    rows = []
+    for (name, _, _), p in zip(STATIONS, payloads):
+        st = Station(name, p)
+        r = compute(st, d)
+        rows.append((name, r, r["models"] < len(MODELS)))
+    html = render(rows, d, datetime.now(PARIS).strftime("%d/%m/%Y %H:%M"))
+    Path(a.out).write_text(html, encoding="utf-8")
+    manquants = [n for n, r, partial in rows if partial]
+    print(f"OK -> {a.out}" + (f" | un seul modèle pour : {', '.join(manquants)}" if manquants else ""))
+
+if __name__ == "__main__":
+    main()
