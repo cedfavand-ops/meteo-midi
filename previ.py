@@ -102,13 +102,14 @@ def frange(a, b):                # heures de a à b inclus, pas 1h
         t += timedelta(hours=1)
 
 # ------------------------------------------------------------ DONNÉES -----
-def fetch(d, batch_size=5, retries=4, timeout=90):
+def fetch(d, stations=None, batch_size=5, retries=4, timeout=90):
     """Interroge Open-Meteo par petits lots de communes, sur 2 jours seulement
     (18h UTC de la veille -> fin du jour d), avec nouvelles tentatives en cas d'échec."""
     start, end = d - timedelta(days=1), d
+    points = stations or STATIONS
     payloads = []
-    for i in range(0, len(STATIONS), batch_size):
-        lot = STATIONS[i:i + batch_size]
+    for i in range(0, len(points), batch_size):
+        lot = points[i:i + batch_size]
         params = {
             "latitude": ",".join(str(s[1]) for s in lot),
             "longitude": ",".join(str(s[2]) for s in lot),
