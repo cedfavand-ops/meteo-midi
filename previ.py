@@ -11,7 +11,7 @@ Usage :
 Cron conseillé (17h45 locale) :
     45 17 * * *  cd /chemin/previ_gard && python3 previ.py
 """
-import argparse, json, math, random, urllib.parse, urllib.request
+import argparse, json, math, random, sys, time, urllib.parse, urllib.request
 from datetime import datetime, date, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -102,19 +102,37 @@ def frange(a, b):                # heures de a à b inclus, pas 1h
         t += timedelta(hours=1)
 
 # ------------------------------------------------------------ DONNÉES -----
-def fetch():
-    params = {
-        "latitude": ",".join(str(s[1]) for s in STATIONS),
-        "longitude": ",".join(str(s[2]) for s in STATIONS),
-        "hourly": ",".join(HOURLY),
-        "models": ",".join(MODELS),
-        "timezone": "UTC", "past_days": 1, "forecast_days": 4,
-        "wind_speed_unit": "kmh",
-    }
-    url = "https://api.open-meteo.com/v1/forecast?" + urllib.parse.urlencode(params)
-    with urllib.request.urlopen(url, timeout=60) as r:
-        data = json.load(r)
-    return data if isinstance(data, list) else [data]
+def fetch(d, batch_size=5, retries=4, timeout=90):
+    """Interroge Open-Meteo par petits lots de communes, sur 2 jours seulement
+    (18h UTC de la veille -> fin du jour d), avec nouvelles tentatives en cas d'échec."""
+    start, end = d - timedelta(days=1), d
+    payloads = []
+    for i in range(0, len(STATIONS), batch_size):
+        lot = STATIONS[i:i + batch_size]
+        params = {
+            "latitude": ",".join(str(s[1]) for s in lot),
+            "longitude": ",".join(str(s[2]) for s in lot),
+            "hourly": ",".join(HOURLY),
+            "models": ",".join(MODELS),
+            "timezone": "UTC",
+            "start_date": start.isoformat(), "end_date": end.isoformat(),
+            "wind_speed_unit": "kmh",
+        }
+        url = "https://api.open-meteo.com/v1/forecast?" + urllib.parse.urlencode(params)
+        req = urllib.request.Request(url, headers={"User-Agent": "Meteo-Midi/1.0 (GitHub Actions)"})
+        for essai in range(1, retries + 1):
+            try:
+                with urllib.request.urlopen(req, timeout=timeout) as r:
+                    data = json.load(r)
+                break
+            except Exception as e:
+                print(f"Lot {i // batch_size + 1} : tentative {essai}/{retries} échouée ({e})", file=sys.stderr)
+                if essai == retries:
+                    raise
+                time.sleep(5 * essai ** 2)          # 5 s, 20 s, 45 s
+        payloads.extend(data if isinstance(data, list) else [data])
+        time.sleep(1)
+    return payloads
 
 def demo_data():
     out, base = [], datetime.now(UTC).replace(tzinfo=None, hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
@@ -460,24 +478,4 @@ Pluie et rafale max : 18 h UTC veille → 18 h UTC · Rafales : <span class="w1"
 Pictogrammes © <a style="color:var(--acc)" href="https://content.meteoblue.com/en/research-education/specifications/standards/symbols-and-pictograms">meteoblue</a> · Prévisions brutes de modèles, non corrigées.</footer>
 </body></html>"""
 
-# ------------------------------------------------------------ MAIN --------
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--date", help="jour prévu AAAA-MM-JJ (défaut : demain)")
-    ap.add_argument("--demo", action="store_true")
-    ap.add_argument("--out", default="previ.html")
-    a = ap.parse_args()
-    d = date.fromisoformat(a.date) if a.date else (datetime.now(PARIS) + timedelta(days=1)).date()
-    payloads = demo_data() if a.demo else fetch()
-    rows = []
-    for (name, _, _), p in zip(STATIONS, payloads):
-        st = Station(name, p)
-        r = compute(st, d)
-        rows.append((name, r, r["models"] < len(MODELS)))
-    html = render(rows, d, datetime.now(PARIS).strftime("%d/%m/%Y %H:%M"))
-    Path(a.out).write_text(html, encoding="utf-8")
-    manquants = [n for n, r, partial in rows if partial]
-    print(f"OK -> {a.out}" + (f" | un seul modèle pour : {', '.join(manquants)}" if manquants else ""))
-
-if __name__ == "__main__":
-    main()
+#
