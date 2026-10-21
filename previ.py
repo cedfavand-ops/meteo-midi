@@ -416,7 +416,7 @@ def render(rows, d, generated):
     sub = "".join('<th class="s">Temps</th><th class="s">T°</th><th class="s">Rafales</th>' for _ in ECHEANCES)
     body = []
     for name, r, partial in rows:
-        cells = "".join(f'<td class="c">{icon_html(e["picto"])}</td><td>{temp_cell(e["t"])}</td>'
+        cells = "".join(f'<td class="c">{icon_html(e["picto"])}</td><td class="t">{temp_cell(e["t"])}</td>'
                         f'<td class="g">{wind_cell(e["gust"], e["dir"])}</td>' for e in r["ech"])
         mark = ' <sup title="Un seul modèle disponible">*</sup>' if partial else ""
         rr = f'{r["rr"]:.1f}'.replace(".", ",")
@@ -449,7 +449,11 @@ th.n{{text-align:left;font-weight:600;padding-left:10px;background:var(--row);po
 tbody tr:nth-child(even) td{{background:rgba(255,255,255,.035)}}
 tbody tr:hover td{{background:rgba(79,195,247,.12)}}
 td.c{{border-left:2px solid var(--line)}}
-td.x{{background:rgba(0,0,0,.18)}} td.tn{{border-left:2px solid var(--acc);color:#7fd4ff}} td.tx{{color:#ffb074}}
+td.x{{background:rgba(0,0,0,.18)}} td.tn{{border-left:2px solid var(--acc);color:#4dc3ff}} td.tx{{color:#ff2020}}
+td.t b{{font-size:22px;font-weight:700}}
+td.tn b,td.tx b{{font-size:26px;font-weight:800}}
+td.tx b{{color:#ff1f1f;text-shadow:0 0 8px rgba(255,31,31,.45)}}
+td.tn b{{color:#4dc3ff}}
 td.rr{{color:#9ad0ff}}
 .pic{{height:34px;border-radius:6px;vertical-align:middle}} .emo{{font-size:24px;line-height:1;vertical-align:middle}}
 td b{{font-size:15px}} small{{color:var(--mut);font-size:10px}} i{{font-style:normal;color:var(--acc);font-size:12px;margin-left:2px}}
