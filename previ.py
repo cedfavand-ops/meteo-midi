@@ -361,9 +361,9 @@ def bulletin(rows):
         tn_lo, tn_hi = min(tn), max(tn)
         tx_lo, tx_hi = min(tx), max(tx)
         moy = rnd(sum(t for t, _ in tx) / len(tx))
-        out.append(f"<b>Températures :</b> minimales de {tn_lo[0]}° ({tn_lo[1]}) à {tn_hi[0]}° ({tn_hi[1]}) ; "
-                   f"maximales de {tx_lo[0]}° ({tx_lo[1]}) à {tx_hi[0]}° ({tx_hi[1]}), "
-                   f"{moy}° en moyenne.")
+        out.append(f"<b>Températures :</b> minimales de {tn_lo[0]} °C ({tn_lo[1]}) à {tn_hi[0]} °C ({tn_hi[1]}) ; "
+                   f"maximales de {tx_lo[0]} °C ({tx_lo[1]}) à {tx_hi[0]} °C ({tx_hi[1]}), "
+                   f"{moy} °C en moyenne.")
 
     # --- Vent
     g = [(r["gmax"], n, r["gmax_dir"]) for n, r in R if r["gmax"] is not None]
@@ -409,7 +409,7 @@ def wind_cell(g, d):
     return f'<span class="{cls}"><b>{g}</b> <small>km/h</small> <i>{dr}</i></span>'
 
 def temp_cell(t):
-    return "–" if t is None else f"<b>{t}°</b>"
+    return "–" if t is None else f'<b>{t}<span class="u">°C</span></b>'
 
 def render(rows, d, generated):
     head = "".join(f'<th colspan="3" class="grp">{e[0]}</th>' for e in ECHEANCES)
@@ -454,6 +454,7 @@ td.t b{{font-size:22px;font-weight:700}}
 td.tn b,td.tx b{{font-size:26px;font-weight:800}}
 td.tx b{{color:#ff1f1f;text-shadow:0 0 8px rgba(255,31,31,.45)}}
 td.tn b{{color:#4dc3ff}}
+.u{{font-size:.55em;font-weight:600;margin-left:1px;opacity:.85}}
 td.rr{{color:#9ad0ff}}
 .pic{{height:34px;border-radius:6px;vertical-align:middle}} .emo{{font-size:24px;line-height:1;vertical-align:middle}}
 td b{{font-size:15px}} small{{color:var(--mut);font-size:10px}} i{{font-style:normal;color:var(--acc);font-size:12px;margin-left:2px}}
