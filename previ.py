@@ -78,7 +78,8 @@ PICTO_FR = {
 }
 
 HOURLY = ["temperature_2m", "wind_gusts_10m", "wind_speed_10m", "wind_direction_10m",
-          "precipitation", "cloud_cover", "cloud_cover_low", "cloud_cover_high", "weather_code"]
+          "precipitation", "cloud_cover", "cloud_cover_low", "cloud_cover_mid", "cloud_cover_high",
+          "weather_code"]
 
 # ------------------------------------------------------------ OUTILS ------
 def rnd(x):                      # arrondi "commercial" (0,5 -> haut)
@@ -149,6 +150,7 @@ def demo_data():
             h[f"precipitation_{m}"] = [max(0, random.uniform(-1.5, 1.5)) if math.sin(i / 7 + ph) > 0.6 else 0 for i in range(len(times))]
             h[f"cloud_cover_{m}"] = [min(100, max(0, 50 + 50 * math.sin(i / 9 + ph))) for i in range(len(times))]
             h[f"cloud_cover_low_{m}"] = [random.uniform(0, 40) for _ in times]
+            h[f"cloud_cover_mid_{m}"] = [random.uniform(0, 40) for _ in times]
             h[f"cloud_cover_high_{m}"] = [random.uniform(0, 60) for _ in times]
             h[f"weather_code_{m}"] = [random.choice([0, 1, 2, 3, 61, 80, 95]) for _ in times]
         out.append({"hourly": h})
@@ -197,36 +199,52 @@ class Station:
         return [c for m in MODELS if (c := self.raw("weather_code", m, t)) is not None]
 
 # ------------------------------------------------------------ CALCULS -----
+def sky_stats(st, t0, t1):
+    """Nébulosité moyenne sur [t0 ; t1] : (totale, basse, moyenne, haute), None si absente."""
+    hrs = list(frange(t0, t1))
+    def avg(v):
+        xs = [x for t in hrs if (x := st.mean(v, t)) is not None]
+        return sum(xs) / len(xs) if xs else None
+    return avg("cloud_cover"), avg("cloud_cover_low"), avg("cloud_cover_mid"), avg("cloud_cover_high")
+
+def opaque_cover(cc, cl, cm, ch):
+    """Couverture par les nuages opaques (bas + moyens), hors cirrus fins.
+    Recouvrement aléatoire entre couches ; si les nuages moyens manquent, on les déduit du total."""
+    cc = 50.0 if cc is None else cc
+    cl, ch = cl or 0.0, ch or 0.0
+    if cm is None:
+        d = (1 - cl / 100) * (1 - ch / 100)
+        cm = max(0.0, min(100.0, 100 * (1 - (1 - cc / 100) / d))) if d > 0.02 else 0.0
+    return 100 * (1 - (1 - cl / 100) * (1 - cm / 100))
+
 def picto(st, t0, t1):
     """Code meteoblue (1-35, jeu "day") pour la fenêtre [t0 ; t1].
-    Heuristique maison (nébulosité totale/basse/haute, cumul de pluie, codes météo des modèles)."""
+    Heuristique maison : le ciel est classé d'après les nuages OPAQUES (bas + moyens) ;
+    les nuages hauts (cirrus) n'ajoutent qu'un voile (pictos « avec cirrus »)."""
     hrs = list(frange(t0, t1))
-
-    def avg(v, default):
-        xs = [x for t in hrs if (x := st.mean(v, t)) is not None]
-        return sum(xs) / len(xs) if xs else default
-
-    cc, cl, ch = avg("cloud_cover", 50), avg("cloud_cover_low", 0), avg("cloud_cover_high", 0)
+    cc, cl, cm, ch = sky_stats(st, t0, t1)
+    ch = ch or 0.0
+    op = opaque_cover(cc, cl, cm, ch)
     p = sum(x for t in hrs[1:] if (x := st.mean("precipitation", t)) is not None)
     temps = [x for t in hrs if (x := st.mean("temperature_2m", t)) is not None]
     codes = [c for t in hrs for c in st.codes(t)]
 
-    def cir(a, b):                       # 0 = rien, 1 = quelques cirrus, 2 = cirrus
-        return 0 if ch < a else 1 if ch < b else 2
+    def cir():                           # 0 = rien, 1 = quelques cirrus, 2 = cirrus
+        return 0 if ch < 10 else 1 if ch < 40 else 2
 
     thunder = any(c in (95, 96, 99) for c in codes)
     snow_code = any(c in (71, 73, 75, 77, 85, 86) for c in codes)
     rain_code = any(c in (51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82) for c in codes)
     wet = p >= 0.3
     snow = snow_code or (wet and temps and max(temps) < 1.0)
-    shower = any(c in (80, 81, 82, 85, 86) for c in codes) or (wet and cc < 85)
+    shower = any(c in (80, 81, 82, 85, 86) for c in codes) or (wet and op < 85)
     fog = bool(codes) and sum(c in (45, 48) for c in codes) > len(codes) / 2
 
     # Précipitations / orages (prioritaires)
     if thunder and wet:
         return 29 if snow else 30 if p >= 8 else 27 if p >= 1.5 else 28
     if thunder:
-        return 10 + cir(10, 30)
+        return 10 + cir()
     if wet and snow:
         if snow_code and rain_code and p >= 0.5: return 35
         if shower: return 32
@@ -234,17 +252,17 @@ def picto(st, t0, t1):
     if wet:
         if shower: return 31
         return 25 if p >= 10 else 23 if p >= 1.5 else 33
-    # Brouillard
     if fog:
-        return 16 + cir(5, 15)
-    # Ciel
-    if cc < 20:
+        return 16 + cir()
+    # Ciel (nuages opaques) + voile de cirrus
+    if op < 20:
+        low = (cl or 0.0) >= 5 or op >= 5
         base = {(0, 0): 1, (0, 1): 2, (0, 2): 3, (1, 0): 4, (1, 1): 5, (1, 2): 6}
-        return base[(1 if cl >= 5 else 0, cir(5, 12))]
-    if cc < 55:
-        return 7 + cir(10, 30)
-    if cc < 85:
-        return 19 + cir(10, 30)
+        return base[(1 if low else 0, cir())]
+    if op < 55:
+        return 7 + cir()
+    if op < 85:
+        return 19 + cir()
     return 22
 
 def compute(st, d):
@@ -387,6 +405,202 @@ def bulletin(rows):
             out.append("<b>Vent :</b> " + txt)
     return out
 
+# ------------------------------------------------------------ CARTE -------
+TABS = ('<nav class="tabs"><button data-v="tableau" class="on">Tableau</button>'
+        '<button data-v="carte">Carte</button></nav>')
+
+MAP_TEMPLATE = r"""<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+.tabs{display:flex;gap:8px;margin:0 0 10px}
+.tabs button,.mapbar button{background:#0f2a55;color:var(--mut);border:1px solid var(--line);border-radius:999px;
+  padding:6px 18px;font-size:13px;cursor:pointer;font-family:inherit}
+.tabs button.on,.mapbar button.on{background:var(--acc);color:#06203a;border-color:var(--acc);font-weight:600}
+.mapbar{display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap}
+#map{height:calc(100vh - 150px);min-height:540px;border-radius:10px;border:1px solid var(--line);
+  background:#0b1d3a;position:relative;overflow:hidden}
+#map.leaflet-container{background:#0b1d3a;font-family:inherit}
+.mkw{background:none;border:0}
+.mk{width:100%;height:100%;box-sizing:border-box;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  background:rgba(9,25,52,.92);border:1px solid #2f5aa0;border-radius:10px;color:#e8f0ff;line-height:1.15;
+  text-align:center;position:relative;box-shadow:0 2px 8px rgba(0,0,0,.55);padding:2px 3px;overflow:visible}
+.mk::after{content:"";position:absolute;left:50%;bottom:-7px;margin-left:-6px;border:6px solid transparent;
+  border-bottom:0;border-top:7px solid #2f5aa0}
+.mk .mn{font-size:10px;color:#9db8e6;max-width:66px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mk .mi{height:32px;display:flex;align-items:center}
+.mk .pic{height:30px}.mk .emo{font-size:24px}
+.mk .mt b{font-size:19px;font-weight:700}.mk .mt.tx b{font-size:20px;font-weight:800;color:#ff1f1f}
+.mk .mt.tn b{font-size:14px;font-weight:700;color:#4dc3ff}
+.mk .mr{font-size:11px;color:#9ad0ff}
+.mk .mg{font-size:10px;color:#cfe0ff;white-space:nowrap}.mk .mg b{font-size:12px}
+.mk .w1 b{color:#ffe082}.mk .w2 b{color:#ffab40}.mk .w3 b{color:#ff6e6e}
+#map.fb{display:flex;justify-content:center;
+  background:radial-gradient(circle at 50% 40%,#12305f,#0a1c3b 75%)}
+.fbx{height:100%;position:relative}
+.fbm{position:absolute;transform:translate(-50%,-100%);width:72px;z-index:2}
+.fbl{position:absolute;left:0;top:0;pointer-events:none}
+.fbm .mk{height:auto;padding:3px}
+.fbnote{position:absolute;left:10px;bottom:6px;font-size:11px;color:var(--mut)}
+.maphelp{color:var(--mut);font-size:12px;margin-top:6px}
+</style>
+<section id="vue-carte" hidden>
+  <div class="mapbar">
+    <button data-m="0" class="on">8 h</button><button data-m="1">12 h</button>
+    <button data-m="2">16 h</button><button data-m="3">Synthèse 24 h</button>
+  </div>
+  <div id="map"></div>
+  <div class="maphelp">Molette ou doigts pour zoomer. Synthèse : Tx en rouge, Tn en bleu, cumul de pluie, rafale max et pictogramme de midi.</div>
+</section>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+(function(){
+  var D = __DATA__;
+  var mode = 0, map = null, inited = false, mk = [], lines = [], FB = null;
+  var SZ = [80, 80, 80, 122], W = 72;
+  function $(s){return document.querySelector(s);}
+  function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;');}
+  function gcls(g){return g==null?'':(g>=80?'w3':g>=60?'w2':g>=40?'w1':'');}
+  function T(v){return v==null?'–':'<b>'+v+'<span class="u">°C</span></b>';}
+  function card(c){
+    var name = '<div class="mn">'+esc(c.name)+'</div>';
+    if (mode < 3) {
+      var e = c.ech[mode];
+      return '<div class="mk">'+name+'<div class="mi">'+(D.icons[e.p]||'')+'</div><div class="mt">'+T(e.t)+'</div>'
+        + '<div class="mg '+gcls(e.g)+'">'+(e.g==null?'':'<b>'+e.g+'</b> '+e.d)+'</div></div>';
+    }
+    var rr = (c.rr!=null && c.rr>=0.2) ? '<div class="mr">'+c.rr.toFixed(1).replace('.',',')+' mm</div>' : '';
+    return '<div class="mk">'+name+'<div class="mi">'+(D.icons[c.ech[1].p]||'')+'</div>'
+      + '<div class="mt tx">'+T(c.tx)+'</div><div class="mt tn">'+T(c.tn)+'</div>'+rr
+      + '<div class="mg '+gcls(c.gmax)+'">'+(c.gmax==null?'':'<b>'+c.gmax+'</b> '+c.gd)+'</div></div>';
+  }
+  // Écarte les cartes qui se chevauchent. P = positions réelles (px) ; renvoie le bas-centre de chaque carte.
+  function declutter(P, w, h, bnd){
+    var gap = 4, n = P.length, C = P.map(function(p){return {x:p.x, y:p.y-7};});
+    for (var it = 0; it < 400; it++) {
+      var moved = false;
+      for (var i = 0; i < n; i++) for (var j = i+1; j < n; j++) {
+        var dx = C[j].x - C[i].x, dy = C[j].y - C[i].y;
+        var ox = (w+gap) - Math.abs(dx), oy = (h+gap) - Math.abs(dy);
+        if (ox > 0 && oy > 0) {
+          moved = true;
+          if (ox < oy) { var sx = (dx >= 0 ? 1 : -1) * ox/2; C[i].x -= sx; C[j].x += sx; }
+          else { var sy = (dy >= 0 ? 1 : -1) * oy/2; C[i].y -= sy; C[j].y += sy; }
+        }
+      }
+      for (i = 0; i < n; i++) {
+        C[i].x += (P[i].x - C[i].x) * 0.02; C[i].y += ((P[i].y-7) - C[i].y) * 0.02;
+        if (bnd) { C[i].x = Math.min(Math.max(C[i].x, bnd.x0), bnd.x1); C[i].y = Math.min(Math.max(C[i].y, bnd.y0), bnd.y1); }
+      }
+      if (!moved) break;
+    }
+    return C;
+  }
+  function icon(c){
+    return L.divIcon({className:'mkw', html:card(c), iconSize:[W,SZ[mode]], iconAnchor:[W/2,SZ[mode]+7]});
+  }
+  function layout(){
+    if (!inited) return;
+    var h = SZ[mode], C, P;
+    if (map) {
+      P = D.communes.map(function(c){var q = map.latLngToLayerPoint([c.lat,c.lon]); return {x:q.x, y:q.y};});
+      C = declutter(P, W, h, null);
+      D.communes.forEach(function(c,i){
+        var ll = map.layerPointToLatLng(L.point(C[i].x, C[i].y+7));
+        mk[i].setLatLng(ll);
+        var far = Math.abs(C[i].x-P[i].x) + Math.abs(C[i].y+7-P[i].y) > 10;
+        lines[i].setLatLngs(far ? [[c.lat,c.lon], ll] : [[c.lat,c.lon],[c.lat,c.lon]]);
+      });
+    } else {
+      var box = $('.fbx'), Wb = box.clientWidth, Hb = box.clientHeight;
+      P = D.communes.map(function(c){return {
+        x:(0.1+0.8*(c.lon-FB.x0)/(FB.x1-FB.x0))*Wb, y:(0.1+0.8*(FB.b-c.lat)/(FB.b-FB.a))*Hb};});
+      C = declutter(P, W, h, {x0:W/2+2, x1:Wb-W/2-2, y0:h+8, y1:Hb-4});
+      var svg = '';
+      D.communes.forEach(function(c,i){
+        mk[i].style.left = C[i].x+'px'; mk[i].style.top = C[i].y+'px';
+        svg += '<line x1="'+C[i].x+'" y1="'+(C[i].y+7)+'" x2="'+P[i].x+'" y2="'+P[i].y+'" stroke="#4fc3f7" stroke-opacity=".7"/>'
+             + '<circle cx="'+P[i].x+'" cy="'+P[i].y+'" r="3" fill="#4fc3f7"/>';
+      });
+      var s = $('.fbl'); s.setAttribute('width', Wb); s.setAttribute('height', Hb); s.innerHTML = svg;
+    }
+  }
+  function init(){
+    if (inited) return;
+    var el = $('#map');
+    if (window.L) {
+      map = L.map(el, {minZoom:8, maxZoom:14, zoomSnap:0.25, zoomDelta:0.5});
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png',
+        {maxZoom:14, subdomains:'abcd', attribution:'© OpenStreetMap · © CARTO'}).addTo(map);
+      D.communes.forEach(function(c){
+        lines.push(L.polyline([[c.lat,c.lon],[c.lat,c.lon]], {color:'#4fc3f7', weight:1, opacity:.75, interactive:false}).addTo(map));
+        L.circleMarker([c.lat,c.lon], {radius:3, color:'#4fc3f7', weight:1, fillColor:'#4fc3f7', fillOpacity:1, interactive:false}).addTo(map);
+      });
+      D.communes.forEach(function(c){
+        mk.push(L.marker([c.lat,c.lon], {icon:icon(c), keyboard:false}).addTo(map));
+      });
+      map.fitBounds(L.latLngBounds(D.communes.map(function(c){return [c.lat,c.lon];})), {padding:[90,90]});
+      inited = true;
+      map.on('zoomend', layout);
+      layout(); setTimeout(layout, 400);
+    } else {                                  // repli sans fond de carte (Leaflet indisponible)
+      el.classList.add('fb');
+      var la = D.communes.map(function(c){return c.lat;}), lo = D.communes.map(function(c){return c.lon;});
+      FB = {a:Math.min.apply(null,la), b:Math.max.apply(null,la), x0:Math.min.apply(null,lo), x1:Math.max.apply(null,lo)};
+      var ar = ((FB.x1-FB.x0)*Math.cos((FB.a+FB.b)/2*Math.PI/180))/(FB.b-FB.a);
+      var box = document.createElement('div'); box.className='fbx'; box.style.aspectRatio = String(ar);
+      el.appendChild(box);
+      box.insertAdjacentHTML('beforeend', '<svg class="fbl"></svg>');
+      D.communes.forEach(function(c){
+        var d = document.createElement('div'); d.className='fbm'; d.innerHTML = card(c); box.appendChild(d); mk.push(d);
+      });
+      var n = document.createElement('div'); n.className='fbnote';
+      n.textContent = 'Carte simplifiée : fond de carte indisponible'; el.appendChild(n);
+      inited = true; layout();
+    }
+  }
+  function refresh(){
+    if (!inited) return;
+    mk.forEach(function(m,i){
+      if (map) m.setIcon(icon(D.communes[i])); else m.innerHTML = card(D.communes[i]);
+    });
+    layout();
+  }
+  function view(v){
+    $('#vue-tableau').hidden = (v !== 'tableau');
+    $('#vue-carte').hidden = (v !== 'carte');
+    document.querySelectorAll('.tabs button').forEach(function(b){b.classList.toggle('on', b.dataset.v===v);});
+    if (v === 'carte') { init(); if (map) map.invalidateSize(); }
+    try { history.replaceState(null, '', v==='carte' ? '#carte' : location.pathname+location.search); } catch(e) {}
+  }
+  document.querySelectorAll('.tabs button').forEach(function(b){b.onclick=function(){view(b.dataset.v);};});
+  document.querySelectorAll('.mapbar button').forEach(function(b){
+    b.onclick = function(){
+      mode = +b.dataset.m;
+      document.querySelectorAll('.mapbar button').forEach(function(x){x.classList.toggle('on', x===b);});
+      refresh();
+    };
+  });
+  window.addEventListener('resize', function(){ if (inited && !map) layout(); });
+  view(location.hash === '#carte' ? 'carte' : 'tableau');
+})();
+</script>
+"""
+
+def map_payload(rows):
+    """Données des communes pour la carte (JSON injecté dans la page)."""
+    coords = {n: (la, lo) for n, la, lo in STATIONS}
+    com = []
+    for name, r, _ in rows:
+        la, lo = coords[name]
+        com.append({
+            "name": name, "lat": la, "lon": lo,
+            "ech": [{"t": e["t"], "g": e["gust"], "d": compass(e["dir"]) if e["dir"] is not None else "",
+                     "p": e["picto"]} for e in r["ech"]],
+            "tn": r["tn"], "tx": r["tx"], "rr": round(r["rr"], 1), "gmax": r["gmax"],
+            "gd": compass(r["gmax_dir"]) if r["gmax_dir"] is not None else ""})
+    codes = sorted({e["p"] for c in com for e in c["ech"]})
+    data = {"communes": com, "icons": {str(k): icon_html(k) for k in codes}}
+    return json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
+
 # ------------------------------------------------------------ RENDU -------
 JOURS = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
 MOIS = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août",
@@ -427,6 +641,8 @@ def render(rows, d, generated):
             f'<td class="x rr">{rr} <small>mm</small></td>'
             f'<td class="x g">{wind_cell(r["gmax"], r["gmax_dir"])}</td></tr>')
     bul = "\n".join(f"<p>{l}</p>" for l in bulletin(rows))
+    tabs = TABS
+    carte = MAP_TEMPLATE.replace("__DATA__", map_payload(rows))
     titre = f"{JOURS[d.weekday()].capitalize()} {d.day} {MOIS[d.month-1]} {d.year}"
     return f"""<!DOCTYPE html>
 <html lang="fr"><head><meta charset="utf-8">
@@ -467,6 +683,8 @@ footer{{color:var(--mut);font-size:11px;margin-top:8px;line-height:1.5}}
 </style></head><body>
 <header><h1>Météo-Midi <span>· Prévisions {titre}</span></h1>
 <div class="sub">Moyenne AROME HD / ICON-CH1 (50/50) · édité le {generated}</div></header>
+{tabs}
+<div id="vue-tableau">
 <div class="wrap"><table>
 <thead>
 <tr><th rowspan="2" class="n">Commune</th>{head}
@@ -479,9 +697,11 @@ footer{{color:var(--mut);font-size:11px;margin-top:8px;line-height:1.5}}
 <section class="bul"><h2>Bulletin</h2>
 {bul}
 </section>
+</div>
+{carte}
 <footer>Échéances en heure locale · Tn : 18 h UTC veille → 18 h UTC · Tx : 6 h → 18 h UTC ·
 Pluie et rafale max : 18 h UTC veille → 18 h UTC · Rafales : <span class="w1"><b>≥40</b></span> <span class="w2"><b>≥60</b></span> <span class="w3"><b>≥80</b></span> km/h ·
-Pictogrammes © <a style="color:var(--acc)" href="https://content.meteoblue.com/en/research-education/specifications/standards/symbols-and-pictograms">meteoblue</a> · Prévisions brutes de modèles, non corrigées.</footer>
+Fond de carte © OpenStreetMap · © CARTO · Pictogrammes © <a style="color:var(--acc)" href="https://content.meteoblue.com/en/research-education/specifications/standards/symbols-and-pictograms">meteoblue</a> · Prévisions brutes de modèles, non corrigées.</footer>
 </body></html>"""
 
 # ------------------------------------------------------------ MAIN --------
