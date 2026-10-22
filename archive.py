@@ -101,9 +101,12 @@ def ensure_meta(ids, token, meta):
 def fc_metrics(st, d):
     """Grandeurs prévues (non arrondies) sur les mêmes fenêtres que le tableau."""
     m = {}
-    for label, h, _ in ECHEANCES:
+    for label, h, (wa, wb) in ECHEANCES:
         t = loc_to_utc(d, h)
         m[f"t{label}"] = r2(st.mean("temperature_2m", t))
+        # picto choisi + nébulosité (totale, basse, moyenne, haute) : sert à régler les seuils
+        m[f"p{label}"] = previ.picto(st, loc_to_utc(d, wa), loc_to_utc(d, wb))
+        m[f"c{label}"] = [r2(x) for x in previ.sky_stats(st, loc_to_utc(d, wa), loc_to_utc(d, wb))]
         g = [x for k in (-1, 0, 1) if (x := st.mean("wind_gusts_10m", t + timedelta(hours=k))) is not None]
         m[f"g{label}"] = r2(max(g)) if g else None
     s, e = utc_dt(d - timedelta(days=1), 18), utc_dt(d, 18)
