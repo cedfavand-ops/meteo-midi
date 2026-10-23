@@ -780,6 +780,7 @@ TABS = ('<nav class="tabs"><button data-v="tableau" class="on">Tableau</button>'
         '<button data-v="carte">Carte</button></nav>')
 
 MAP_TEMPLATE = r"""<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
 <style>
 .tabs{display:flex;gap:8px;margin:0 0 10px}
 .tabs button,.mapbar button{background:#0f2a55;color:var(--mut);border:1px solid var(--line);border-radius:999px;
@@ -790,6 +791,10 @@ MAP_TEMPLATE = r"""<link rel="stylesheet" href="https://cdnjs.cloudflare.com/aja
   background:#0b1d3a;position:relative;overflow:hidden}
 #map.leaflet-container{background:#0b1d3a;font-family:inherit}
 .mkw{background:none;border:0}
+.leaflet-control-layers,.leaflet-bar a{background:#0f2a55;color:#e8f0ff;border-color:#2f5aa0}
+.leaflet-control-layers{border:1px solid #2f5aa0;font-family:inherit;font-size:12px}
+.leaflet-control-attribution{background:rgba(9,25,52,.75)!important;color:#9db8e6!important}
+.leaflet-control-attribution a{color:#4fc3f7!important}
 .mk{width:100%;height:100%;box-sizing:border-box;display:flex;flex-direction:column;align-items:center;justify-content:center;
   background:rgba(9,25,52,.92);border:1px solid #2f5aa0;border-radius:10px;color:#e8f0ff;line-height:1.15;
   text-align:center;position:relative;box-shadow:0 2px 8px rgba(0,0,0,.55);padding:2px 3px;overflow:visible}
@@ -902,13 +907,35 @@ MAP_TEMPLATE = r"""<link rel="stylesheet" href="https://cdnjs.cloudflare.com/aja
       var s = $('.fbl'); s.setAttribute('width', Wb); s.setAttribute('height', Hb); s.innerHTML = svg;
     }
   }
+  var started = false;
+  function withLeaflet(cb){                    // Leaflet : cdnjs d'abord, jsDelivr en secours
+    if (window.L) return cb();
+    var sc = document.createElement('script');
+    sc.src = 'https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js';
+    sc.onload = cb; sc.onerror = cb; document.head.appendChild(sc);
+  }
   function init(){
-    if (inited) return;
+    if (started) return; started = true; withLeaflet(build);
+  }
+  function build(){
     var el = $('#map');
     if (window.L) {
       map = L.map(el, {minZoom:8, maxZoom:14, zoomSnap:0.25, zoomDelta:0.5});
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png',
-        {maxZoom:14, subdomains:'abcd', attribution:'© OpenStreetMap · © CARTO'}).addTo(map);
+      var fonds = {
+        'Sombre': L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+          {maxZoom:14, subdomains:'abcd', attribution:'© OpenStreetMap · © CARTO'}),
+        'Plan': L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+          {maxZoom:14, attribution:'© OpenStreetMap'}),
+        'Relief': L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
+          {maxZoom:14, subdomains:'abc', attribution:'© OpenStreetMap, SRTM · © OpenTopoMap'})
+      };
+      fonds['Sombre'].addTo(map);
+      L.control.layers(fonds, null, {position:'topright', collapsed:true}).addTo(map);
+      var okT = 0, koT = 0;                    // si le fond sombre ne charge rien, bascule sur « Plan »
+      fonds['Sombre'].on('tileload', function(){ okT++; });
+      fonds['Sombre'].on('tileerror', function(){
+        if (++koT >= 4 && okT === 0 && map.hasLayer(fonds['Sombre'])) { map.removeLayer(fonds['Sombre']); fonds['Plan'].addTo(map); }
+      });
       D.communes.forEach(function(c){
         lines.push(L.polyline([[c.lat,c.lon],[c.lat,c.lon]], {color:'#4fc3f7', weight:1, opacity:.75, interactive:false}).addTo(map));
         L.circleMarker([c.lat,c.lon], {radius:3, color:'#4fc3f7', weight:1, fillColor:'#4fc3f7', fillOpacity:1, interactive:false}).addTo(map);
