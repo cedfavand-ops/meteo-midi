@@ -11,7 +11,7 @@ Usage :
 Cron conseillé (17h45 locale) :
     45 17 * * *  cd /chemin/previ_gard && python3 previ.py
 """
-import argparse, json, math, random, sys, time, urllib.error, urllib.parse, urllib.request
+import argparse, json, math, random, shutil, sys, time, urllib.error, urllib.parse, urllib.request
 from datetime import datetime, date, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -806,7 +806,7 @@ MAP_TEMPLATE = r"""<link rel="stylesheet" href="https://cdnjs.cloudflare.com/aja
   padding:6px 18px;font-size:13px;cursor:pointer;font-family:inherit}
 .tabs button.on,.mapbar button.on{background:var(--acc);color:#06203a;border-color:var(--acc);font-weight:600}
 .mapbar{display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap}
-#map{height:calc(100vh - 150px);min-height:540px;border-radius:10px;border:1px solid var(--line);
+#map{height:calc(100vh - 290px);min-height:540px;border-radius:10px;border:1px solid var(--line);
   background:#0b1d3a;position:relative;overflow:hidden}
 #map.leaflet-container{background:#0b1d3a;font-family:inherit}
 .mkw{background:none;border:0}
@@ -841,6 +841,7 @@ MAP_TEMPLATE = r"""<link rel="stylesheet" href="https://cdnjs.cloudflare.com/aja
 #bulpage .lit{max-width:960px;margin:8px auto 0;padding:24px 34px 14px}
 #bulpage .lit h2{font-size:22px;margin-bottom:12px}
 #bulpage .lit p{font-size:17.5px;line-height:1.75}
+#bulpage .lit p.note{font-size:12.5px;line-height:1.5}
 .lit{margin-top:16px;background:linear-gradient(180deg,#112b55,#0d2147);border:1px solid var(--line);
   border-left:4px solid var(--acc);border-radius:10px;padding:16px 24px 10px;
   font-family:Georgia,"Times New Roman",serif}
@@ -1078,11 +1079,25 @@ def icon_html(code):
            else "🌥️" if SKY_OF.get(code) == 3 else "☁️" if code == 22 else "🌤️")
     return f'<span class="emo" title="{lab}">{emo}</span>'
 
+def wind_color(g):
+    """Couleur de la rafale (identique à celle des flèches de la carte)."""
+    return ("#ff3b3b" if g >= 100 else "#ff9a1f" if g >= 80 else "#ffd21f" if g >= 60
+            else "#4fc3f7" if g >= 30 else "#7fa6d6")
+
+def wind_arrow(d, g, size=18):
+    """Flèche orientée vers le sens où souffle le vent (d = direction d'où il vient), colorée selon la rafale."""
+    if d is None:
+        return ""
+    return (f'<svg class="wa" viewBox="-12 -12 24 24" width="{size}" height="{size}" role="img">'
+            f'<title>Vent {de_nom(d)}</title>'
+            f'<g transform="rotate({round((d + 180) % 360)})">'
+            f'<path d="M0,-11 L9.5,-1 L3.8,-1 L3.8,11 L-3.8,11 L-3.8,-1 L-9.5,-1 Z" fill="{wind_color(g)}" '
+            f'stroke="#06142b" stroke-width="1.2" stroke-linejoin="round"/></g></svg>')
+
 def wind_cell(g, d):
     if g is None: return "–"
-    cls = "w3" if g >= 80 else "w2" if g >= 60 else "w1" if g >= 40 else ""
-    dr = compass(d) if d is not None else ""
-    return f'<span class="{cls}"><b>{g}</b> <small>km/h</small> <i>{dr}</i></span>'
+    cls = "g3" if g >= 100 else "g2" if g >= 80 else "g1" if g >= 60 else ""
+    return f'<span class="{cls}"><b>{g}</b> <small>km/h</small> {wind_arrow(d, g)}</span>'
 
 def temp_cell(t):
     return "–" if t is None else f'<b>{t}<span class="u">°C</span></b>'
@@ -1101,7 +1116,6 @@ def render(rows, d, generated):
             f'<td class="x tn">{temp_cell(r["tn"])}</td><td class="x tx">{temp_cell(r["tx"])}</td>'
             f'<td class="x rr">{rr} <small>mm</small></td>'
             f'<td class="x g">{wind_cell(r["gmax"], r["gmax_dir"])}</td></tr>')
-    bul = "\n".join(f"<p>{l}</p>" for l in bulletin(rows))
     tabs = TABS
     carte = MAP_TEMPLATE.replace("__DATA__", map_payload(rows)).replace("__BULLETIN__", bulletin_litteraire(rows, d))
     titre = f"{JOURS[d.weekday()].capitalize()} {d.day} {MOIS[d.month-1]} {d.year}"
@@ -1114,9 +1128,11 @@ def render(rows, d, generated):
 *{{box-sizing:border-box}}
 body{{margin:0;background:radial-gradient(circle at 20% 0,#14305e,#081530 70%);color:var(--txt);
 font-family:"Segoe UI",Roboto,Helvetica,Arial,sans-serif;padding:14px 18px}}
-header{{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px}}
+header{{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:10px}}
+.logo{{height:116px;width:auto;border-radius:8px;display:block;box-shadow:0 2px 12px rgba(0,0,0,.5);border:1px solid var(--line)}}
+@media (max-width:700px){{.logo{{height:70px}}}}
 h1{{font-size:20px;margin:0;letter-spacing:.5px}} h1 span{{color:var(--acc)}}
-.sub{{color:var(--mut);font-size:12px}}
+.sub{{color:var(--mut);font-size:13px;margin-top:3px}}
 .wrap{{overflow-x:auto}}
 table{{width:100%;border-collapse:collapse;font-size:14px;background:var(--card);border-radius:8px;overflow:hidden}}
 th,td{{padding:3px 6px;text-align:center;white-space:nowrap;border-bottom:1px solid var(--line)}}
@@ -1136,14 +1152,16 @@ td.tn b{{color:#4dc3ff}}
 td.rr{{color:#9ad0ff}}
 .pic{{height:34px;border-radius:6px;vertical-align:middle}} .emo{{font-size:24px;line-height:1;vertical-align:middle}}
 td b{{font-size:15px}} small{{color:var(--mut);font-size:10px}} i{{font-style:normal;color:var(--acc);font-size:12px;margin-left:2px}}
-.w1 b{{color:#ffe082}} .w2 b{{color:#ffab40}} .w3 b{{color:#ff6e6e}}
+.g1 b{{color:#ffd21f}} .g2 b{{color:#ff9a1f}} .g3 b{{color:#ff5a5a}}
+.wa{{vertical-align:middle;margin-left:4px}}
 td.g{{text-align:left;min-width:92px}}
 .bul{{margin-top:12px;background:var(--card);border-left:4px solid var(--acc);border-radius:8px;padding:10px 16px}}.bul h2{{margin:0 0 6px;font-size:14px;color:var(--acc);letter-spacing:.5px;text-transform:uppercase}}.bul p{{margin:3px 0;font-size:14px;line-height:1.45}} .bul b{{color:#fff}}
 footer{{color:var(--mut);font-size:11px;margin-top:8px;line-height:1.5}}
 @media (max-width:900px){{table{{font-size:12px}} .pic{{height:24px}}}}
 </style></head><body>
-<header><h1>Météo-Midi <span>· Prévisions {titre}</span></h1>
-<div class="sub">Moyenne AROME HD / ICON-CH1 (50/50) · édité le {generated}</div></header>
+<header><div class="tl"><h1>Météo-Midi <span>· Prévisions {titre}</span></h1>
+<div class="sub">Édité le {generated}</div></div>
+<img class="logo" src="logo.jpg" alt="Météo-Midi · La météo dans le Gard rhodanien" onerror="this.style.display='none'"></header>
 {tabs}
 <div id="vue-tableau">
 <div class="wrap"><table>
@@ -1155,14 +1173,13 @@ footer{{color:var(--mut);font-size:11px;margin-top:8px;line-height:1.5}}
 <tbody>
 {chr(10).join(body)}
 </tbody></table></div>
-<section class="bul"><h2>Bulletin</h2>
-{bul}
-</section>
 </div>
 {carte}
 <footer>Échéances en heure locale · Tn : 18 h UTC veille → 18 h UTC · Tx : 6 h → 18 h UTC ·
-Pluie et rafale max : 18 h UTC veille → 18 h UTC · Rafales : <span class="w1"><b>≥40</b></span> <span class="w2"><b>≥60</b></span> <span class="w3"><b>≥80</b></span> km/h ·
-Fond de carte © OpenStreetMap contributors · © OpenTopoMap · Pictogrammes © <a style="color:var(--acc)" href="https://content.meteoblue.com/en/research-education/specifications/standards/symbols-and-pictograms">meteoblue</a> · Prévisions brutes de modèles, non corrigées.</footer>
+Pluie et rafale max : 18 h UTC veille → 18 h UTC · Flèche du vent : sens vers lequel il souffle, colorée selon la rafale
+<span style="color:#7fa6d6">&lt;30</span> · <span style="color:#4fc3f7">30–59</span> · <span style="color:#ffd21f">60–79</span> ·
+<span style="color:#ff9a1f">80–99</span> · <span style="color:#ff3b3b">≥100</span> km/h ·
+Fond de carte © OpenStreetMap contributors · © OpenTopoMap · Pictogrammes © <a style="color:var(--acc)" href="https://content.meteoblue.com/en/research-education/specifications/standards/symbols-and-pictograms">meteoblue</a></footer>
 </body></html>"""
 
 # ------------------------------------------------------------ MAIN --------
@@ -1181,6 +1198,13 @@ def main():
         rows.append((name, r, r["models"] < len(MODELS)))
     html = render(rows, d, datetime.now(PARIS).strftime("%d/%m/%Y %H:%M"))
     Path(a.out).write_text(html, encoding="utf-8")
+    logo = Path(__file__).with_name("logo.jpg")
+    if logo.exists():
+        cible = Path(a.out).resolve().parent / "logo.jpg"
+        if cible != logo.resolve():                       # déjà au bon endroit : rien à copier
+            shutil.copy(logo, cible)
+    else:
+        print("Avertissement : logo.jpg introuvable à côté de previ.py (la page s'affichera sans logo).", file=sys.stderr)
     manquants = [n for n, r, partial in rows if partial]
     print(f"OK -> {a.out}" + (f" | un seul modèle pour : {', '.join(manquants)}" if manquants else ""))
 
