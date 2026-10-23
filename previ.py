@@ -82,6 +82,24 @@ HOURLY = ["temperature_2m", "wind_gusts_10m", "wind_speed_10m", "wind_direction_
           "weather_code"]
 
 # ------------------------------------------------------------ OUTILS ------
+def r10(x):                      # rafales : dizaine la plus proche
+    return None if x is None else int(math.floor(x / 10 + 0.5)) * 10
+
+PLUIE_CLASSES = [(1, "0,1 à 1"), (2, "1 à 2"), (5, "2 à 5"), (10, "5 à 10"), (20, "10 à 20"),
+                 (50, "20 à 50"), (100, "50 à 100"), (150, "100 à 150"), (200, "150 à 200")]
+
+def classe_pluie(v):
+    """Tranche de cumul en mm : « 0 », « 0,1 à 1 », « 1 à 2 », … « > 200 » (bornes hautes incluses)."""
+    if v is None:
+        return "–"
+    if v < 0.1:
+        return "0"
+    v = round(v, 1)
+    for borne, label in PLUIE_CLASSES:
+        if v <= borne:
+            return label
+    return "> 200"
+
 def rnd(x):                      # arrondi "commercial" (0,5 -> haut)
     return None if x is None else int(math.floor(x + 0.5))
 
@@ -315,7 +333,7 @@ def compute(st, d):
         res["ech"].append({
             "label": label,
             "t": rnd(temp + dt) if temp is not None else None,
-            "gust": rnd(gmax), "dir": st.direction(t),
+            "gust": r10(gmax), "dir": st.direction(t),
             "picto": picto(st, loc_to_utc(d, a), loc_to_utc(d, b)),
         })
     s_tn, e_tn = utc_dt(d - timedelta(days=1), TN_START_UTC), utc_dt(d, TN_END_UTC)
@@ -326,7 +344,7 @@ def compute(st, d):
     # précip : l'échéance horaire h cumule (h-1 ; h]
     res["rr"] = sum(p for t in frange(s_tn + timedelta(hours=1), e_tn) if (p := st.mean("precipitation", t)) is not None)
     gs = [g for t in frange(s_tn + timedelta(hours=1), e_tn) if (g := st.mean("wind_gusts_10m", t)) is not None]
-    res["gmax"] = rnd(max(gs)) if gs else None
+    res["gmax"] = r10(max(gs)) if gs else None
     res["gmax_dir"] = None
     if gs:
         tmax = max((t for t in frange(s_tn + timedelta(hours=1), e_tn) if st.mean("wind_gusts_10m", t) is not None),
@@ -397,11 +415,10 @@ def bulletin(rows):
         par_ech = [sum(r["ech"][i]["picto"] in WET for _, r in R) for i in range(len(ECHEANCES))]
         i_max = par_ech.index(max(par_ech))
         txt = (f"pluie sur {len(wet_st)} commune{'s' if len(wet_st) > 1 else ''} "
-               f"({liste(wet_st)}), surtout {MOMENTS[i_max]}, jusqu'à {str(round(rr_max, 1)).replace('.', ',')} mm "
+               f"({liste(wet_st)}), surtout {MOMENTS[i_max]}, avec des cumuls de {classe_pluie(rr_max)} mm "
                f"à {rr_max_n} sur 24 h.")
     elif rr_max >= 0.2:
-        txt = (f"quelques gouttes possibles localement (max {str(round(rr_max, 1)).replace('.', ',')} mm "
-               f"à {rr_max_n}).")
+        txt = f"quelques gouttes possibles localement (moins de 1 mm)."
     else:
         txt = "pas de précipitation significative."
     if orage_st:
@@ -636,7 +653,7 @@ def lit_matin(R, S, V, rng):
             out.append("Le vent est quasi nul, tout au plus quelques brises légères.")
         else:
             out.append(f"{cap(vent_nom(v['dir'], v['mean']))} " + rng.choice(["souffle dès le lever", "se fait déjà sentir au lever"])
-                       + f", avec des rafales d’environ {rnd(v['mean'])}{NB}km/h en moyenne.")
+                       + f", avec des rafales d’environ {r10(v['mean'])}{NB}km/h en moyenne.")
     return " ".join(out)
 
 def lit_apres_midi(R, S, V, rng):
@@ -696,12 +713,12 @@ def lit_apres_midi(R, S, V, rng):
         g0, g1 = V[0]["mean"], vv["mean"]
         pic = vv["max"]
         if g1 >= 15 or g0 >= 15:
-            pointe = f", avec des pointes à {rnd(pic[0])}{NB}km/h à {pic[2]}" if pic[0] >= g1 + 8 else ""
+            pointe = f", avec des pointes à {r10(pic[0])}{NB}km/h à {pic[2]}" if pic[0] >= g1 + 8 else ""
             if g1 >= 1.2 * g0 and g1 >= 25:
                 t = (f"Le vent se renforce{NB}: {vent_nom(vv['dir'], g1)}, avec des rafales d’environ "
-                     f"{rnd(g1)}{NB}km/h en moyenne" + (f" et des pointes à {rnd(pic[0])}{NB}km/h à {pic[2]}" if pointe else ""))
+                     f"{r10(g1)}{NB}km/h en moyenne" + (f" et des pointes à {r10(pic[0])}{NB}km/h à {pic[2]}" if pointe else ""))
             elif g1 <= 0.8 * g0:
-                t = f"Le vent mollit progressivement, les rafales ne dépassant guère {rnd(g1)}{NB}km/h en moyenne en fin de journée"
+                t = f"Le vent mollit progressivement, les rafales ne dépassant guère {r10(g1)}{NB}km/h en moyenne en fin de journée"
             else:
                 t = f"Le vent se maintient{NB}: {vent_nom(vv['dir'], g1)}{pointe}"
             if V[0]["dir"] is not None and vv["dir"] is not None and min(abs(V[0]["dir"] - vv["dir"]), 360 - abs(V[0]["dir"] - vv["dir"])) >= 60 and g1 >= 20:
@@ -719,8 +736,10 @@ def lit_resume(R, S, V, rng):
     if tn and tx:
         bits.append(f"des minimales {plage(min(tn), max(tn))} et des maximales {plage(min(tx), max(tx))}")
     rrmax = max(rr) if rr else (0, "")
-    bits.append(f"des cumuls de pluie sur 24{NB}h allant jusqu’à {str(round(rrmax[0], 1)).replace('.', ',')}{NB}mm à {rrmax[1]}"
-                if rrmax[0] >= 1 else "aucune pluie significative")
+    cl = classe_pluie(rrmax[0])
+    bits.append((f"des cumuls de pluie sur 24{NB}h supérieurs à 200{NB}mm à {rrmax[1]}" if cl == "> 200"
+                 else f"des cumuls de pluie sur 24{NB}h de {cl}{NB}mm à {rrmax[1]}") if rrmax[0] > 1 else
+                "quelques gouttes sans conséquence" if rrmax[0] >= 0.1 else "aucune pluie")
     if gm:
         g = max(gm)
         bits.append(f"des rafales maximales de {g[0]}{NB}km/h à {g[1]}")
@@ -791,31 +810,37 @@ MAP_TEMPLATE = r"""<link rel="stylesheet" href="https://cdnjs.cloudflare.com/aja
   background:#0b1d3a;position:relative;overflow:hidden}
 #map.leaflet-container{background:#0b1d3a;font-family:inherit}
 .mkw{background:none;border:0}
+.tuiles-sombres{filter:url(#fond-sombre)}
 .leaflet-control-layers,.leaflet-bar a{background:#0f2a55;color:#e8f0ff;border-color:#2f5aa0}
 .leaflet-control-layers{border:1px solid #2f5aa0;font-family:inherit;font-size:12px}
 .leaflet-control-attribution{background:rgba(9,25,52,.75)!important;color:#9db8e6!important}
 .leaflet-control-attribution a{color:#4fc3f7!important}
-.mk{width:100%;height:100%;box-sizing:border-box;display:flex;flex-direction:column;align-items:center;justify-content:center;
-  background:rgba(9,25,52,.92);border:1px solid #2f5aa0;border-radius:10px;color:#e8f0ff;line-height:1.15;
-  text-align:center;position:relative;box-shadow:0 2px 8px rgba(0,0,0,.55);padding:2px 3px;overflow:visible}
+.mk{position:absolute;left:0;right:0;bottom:0;box-sizing:border-box;display:flex;flex-direction:column;align-items:center;
+  background:rgba(9,25,52,.94);border:1px solid #2f5aa0;border-radius:11px;color:#e8f0ff;line-height:1.15;
+  text-align:center;box-shadow:0 2px 9px rgba(0,0,0,.6);padding:5px 5px 6px}
 .mk::after{content:"";position:absolute;left:50%;bottom:-7px;margin-left:-6px;border:6px solid transparent;
   border-bottom:0;border-top:7px solid #2f5aa0}
-.mk .mn{font-size:10px;color:#9db8e6;max-width:66px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.mk .mi{height:32px;display:flex;align-items:center}
-.mk .pic{height:30px}.mk .emo{font-size:24px}
-.mk .mt b{font-size:19px;font-weight:700}.mk .mt.tx b{font-size:20px;font-weight:800;color:#ff1f1f}
-.mk .mt.tn b{font-size:14px;font-weight:700;color:#4dc3ff}
-.mk .mr{font-size:11px;color:#9ad0ff}
-.mk .mg{font-size:10px;color:#cfe0ff;white-space:nowrap}.mk .mg b{font-size:12px}
-.mk .w1 b{color:#ffe082}.mk .w2 b{color:#ffab40}.mk .w3 b{color:#ff6e6e}
-#map.fb{display:flex;justify-content:center;
-  background:radial-gradient(circle at 50% 40%,#12305f,#0a1c3b 75%)}
-.fbx{height:100%;position:relative}
-.fbm{position:absolute;transform:translate(-50%,-100%);width:72px;z-index:2}
+.mk .mn{font-size:12.5px;font-weight:600;line-height:16px;color:#d6e5ff;max-width:100%;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.mk .mi{height:46px;margin:3px 0 2px;display:flex;align-items:center;justify-content:center}
+.mk .pic{height:44px;width:auto}.mk .emo{font-size:36px;line-height:44px}
+.mk .mt b{font-size:22px;font-weight:700}.mk .mt.tx b{font-size:24px;font-weight:800;color:#ff1f1f}
+.mk .mt.tn b{font-size:15px;font-weight:700;color:#4dc3ff}
+.mk .mr{font-size:11px;color:#9ad0ff;white-space:nowrap;margin-top:1px}
+.mk .mg{display:flex;align-items:center;justify-content:center;gap:4px;font-size:11px;color:#cfe0ff;white-space:nowrap;margin-top:2px}
+.mk .mg b{font-size:14px;color:#fff}.mk .mg i{font-style:normal;color:#8fd3ff}
+.mk .ar{flex:none;display:block}
+.mk .wv{text-align:left;line-height:1.2}
+#map.fb{background:radial-gradient(circle at 50% 40%,#12305f,#0a1c3b 75%)}
+.fbx{position:absolute;left:0;top:0;right:0;bottom:0}
+.fbm{position:absolute;transform:translate(-50%,-100%);width:104px;z-index:2}
 .fbl{position:absolute;left:0;top:0;pointer-events:none}
-.fbm .mk{height:auto;padding:3px}
+.fbm .mk{position:relative}
 .fbnote{position:absolute;left:10px;bottom:6px;font-size:11px;color:var(--mut)}
 .maphelp{color:var(--mut);font-size:12px;margin-top:6px}
+#bulpage .lit{max-width:960px;margin:8px auto 0;padding:24px 34px 14px}
+#bulpage .lit h2{font-size:22px;margin-bottom:12px}
+#bulpage .lit p{font-size:17.5px;line-height:1.75}
 .lit{margin-top:16px;background:linear-gradient(180deg,#112b55,#0d2147);border:1px solid var(--line);
   border-left:4px solid var(--acc);border-radius:10px;padding:16px 24px 10px;
   font-family:Georgia,"Times New Roman",serif}
@@ -825,41 +850,60 @@ MAP_TEMPLATE = r"""<link rel="stylesheet" href="https://cdnjs.cloudflare.com/aja
 .lit p.note{font-size:11.5px;color:var(--mut);font-style:italic;text-align:left;margin-top:12px;
   font-family:"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
 </style>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><filter id="fond-sombre" color-interpolation-filters="sRGB"><feColorMatrix type="matrix" values="-0.2551 -0.8582 -0.0866 0.0000 1.2392 -0.2750 -0.9250 -0.0934 0.0000 1.3953 -0.2778 -0.9345 -0.0943 0.0000 1.5184 0.0000 0.0000 0.0000 1.0000 0.0000"/></filter></svg>
 <section id="vue-carte" hidden>
   <div class="mapbar">
     <button data-m="0" class="on">8 h</button><button data-m="1">12 h</button>
-    <button data-m="2">16 h</button><button data-m="3">Synthèse 24 h</button>
+    <button data-m="2">16 h</button><button data-m="3">Synthèse 24 h</button><button data-m="4">Bulletin</button>
   </div>
-  <div id="map"></div>
-  <div class="maphelp">Molette ou doigts pour zoomer. Synthèse : Tx en rouge, Tn en bleu, cumul de pluie, rafale max et pictogramme de midi.</div>
+  <div id="mapwrap">
+    <div id="map"></div>
+    <div class="maphelp">Molette ou doigts pour zoomer. Vent : rafales en km/h arrondies à la dizaine ; la flèche indique le sens vers lequel
+      souffle le vent, <b style="color:#ffd21f">jaune</b> dès 60, <b style="color:#ff9a1f">orange</b> dès 80, <b style="color:#ff3b3b">rouge</b> dès 100 km/h.
+      Synthèse : Tx en rouge, Tn en bleu, pluie, rafale max et pictogramme de midi.</div>
+  </div>
+  <div id="bulpage" hidden>
   __BULLETIN__
+  </div>
 </section>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>
 (function(){
   var D = __DATA__;
   var mode = 0, map = null, inited = false, mk = [], lines = [], FB = null;
-  var SZ = [80, 80, 80, 122], W = 72;
+  var SZ = [142, 142, 142, 178], W = 104;
   function $(s){return document.querySelector(s);}
   function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;');}
   function gcls(g){return g==null?'':(g>=80?'w3':g>=60?'w2':g>=40?'w1':'');}
   function T(v){return v==null?'–':'<b>'+v+'<span class="u">°C</span></b>';}
+  function arrow(dd, g){                       // flèche épaisse, orientée vers où souffle le vent
+    if (g == null || dd == null || g < 60) return '';
+    var col = g > 99 ? '#ff3b3b' : g > 79 ? '#ff9a1f' : '#ffd21f';
+    return '<svg class="ar" viewBox="-12 -12 24 24" width="24" height="24" aria-hidden="true"><g transform="rotate('+Math.round((dd+180)%360)+')">'
+      + '<path d="M0,-11 L9.5,-1 L3.8,-1 L3.8,11 L-3.8,11 L-3.8,-1 L-9.5,-1 Z" fill="'+col+'" stroke="#06142b" stroke-width="1.3" stroke-linejoin="round"/></g></svg>';
+  }
+  function wind(g, d, dd){
+    if (g == null) return '<div class="mg">–</div>';
+    var ar = arrow(dd, g);                       // avec flèche : la direction passe sous la vitesse
+    return '<div class="mg">'+ar+(ar ? '<span class="wv"><b>'+g+'</b> km/h'+(d ? '<br><i>'+d+'</i>' : '')+'</span>'
+                                  : '<span><b>'+g+'</b> km/h'+(d ? ' <i>'+d+'</i>' : '')+'</span>')+'</div>';
+  }
   function card(c){
     var name = '<div class="mn">'+esc(c.name)+'</div>';
     if (mode < 3) {
       var e = c.ech[mode];
       return '<div class="mk">'+name+'<div class="mi">'+(D.icons[e.p]||'')+'</div><div class="mt">'+T(e.t)+'</div>'
-        + '<div class="mg '+gcls(e.g)+'">'+(e.g==null?'':'<b>'+e.g+'</b> '+e.d)+'</div></div>';
+        + wind(e.g, e.d, e.dd)+'</div>';
     }
-    var rr = (c.rr!=null && c.rr>=0.2) ? '<div class="mr">'+c.rr.toFixed(1).replace('.',',')+' mm</div>' : '';
+    var rr = (c.rr!=null && c.rr>=0.1) ? '<div class="mr">'+c.rc+' mm</div>' : '';
     return '<div class="mk">'+name+'<div class="mi">'+(D.icons[c.ech[1].p]||'')+'</div>'
       + '<div class="mt tx">'+T(c.tx)+'</div><div class="mt tn">'+T(c.tn)+'</div>'+rr
-      + '<div class="mg '+gcls(c.gmax)+'">'+(c.gmax==null?'':'<b>'+c.gmax+'</b> '+c.gd)+'</div></div>';
+      + wind(c.gmax, c.gd, c.gdd)+'</div>';
   }
   // Écarte les cartes qui se chevauchent. P = positions réelles (px) ; renvoie le bas-centre de chaque carte.
   function declutter(P, w, h, bnd){
-    var gap = 4, n = P.length, C = P.map(function(p){return {x:p.x, y:p.y-7};});
-    for (var it = 0; it < 400; it++) {
+    var gap = 6, n = P.length, C = P.map(function(p){return {x:p.x, y:p.y-7};});
+    for (var it = 0; it < 1500; it++) {
       var moved = false;
       for (var i = 0; i < n; i++) for (var j = i+1; j < n; j++) {
         var dx = C[j].x - C[i].x, dy = C[j].y - C[i].y;
@@ -871,7 +915,7 @@ MAP_TEMPLATE = r"""<link rel="stylesheet" href="https://cdnjs.cloudflare.com/aja
         }
       }
       for (i = 0; i < n; i++) {
-        C[i].x += (P[i].x - C[i].x) * 0.02; C[i].y += ((P[i].y-7) - C[i].y) * 0.02;
+        C[i].x += (P[i].x - C[i].x) * 0.006; C[i].y += ((P[i].y-7) - C[i].y) * 0.006;
         if (bnd) { C[i].x = Math.min(Math.max(C[i].x, bnd.x0), bnd.x1); C[i].y = Math.min(Math.max(C[i].y, bnd.y0), bnd.y1); }
       }
       if (!moved) break;
@@ -895,9 +939,11 @@ MAP_TEMPLATE = r"""<link rel="stylesheet" href="https://cdnjs.cloudflare.com/aja
       });
     } else {
       var box = $('.fbx'), Wb = box.clientWidth, Hb = box.clientHeight;
+      var latc = (FB.a+FB.b)/2, lonc = (FB.x0+FB.x1)/2, kx = 111.32*Math.cos(latc*Math.PI/180), ky = 110.57;
+      var sc = Math.min((Wb-2*(W/2+40))/((FB.x1-FB.x0)*kx), (Hb-h-60)/((FB.b-FB.a)*ky));
       P = D.communes.map(function(c){return {
-        x:(0.1+0.8*(c.lon-FB.x0)/(FB.x1-FB.x0))*Wb, y:(0.1+0.8*(FB.b-c.lat)/(FB.b-FB.a))*Hb};});
-      C = declutter(P, W, h, {x0:W/2+2, x1:Wb-W/2-2, y0:h+8, y1:Hb-4});
+        x:Wb/2+(c.lon-lonc)*kx*sc, y:(Hb+h)/2-(c.lat-latc)*ky*sc};});
+      C = declutter(P, W, h, {x0:W/2+4, x1:Wb-W/2-4, y0:h+10, y1:Hb-8});
       var svg = '';
       D.communes.forEach(function(c,i){
         mk[i].style.left = C[i].x+'px'; mk[i].style.top = C[i].y+'px';
@@ -922,8 +968,8 @@ MAP_TEMPLATE = r"""<link rel="stylesheet" href="https://cdnjs.cloudflare.com/aja
     if (window.L) {
       map = L.map(el, {minZoom:8, maxZoom:14, zoomSnap:0.25, zoomDelta:0.5});
       var fonds = {
-        'Sombre': L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-          {maxZoom:14, subdomains:'abcd', attribution:'© OpenStreetMap · © CARTO'}),
+        'Sombre': L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+          {maxZoom:14, className:'tuiles-sombres', attribution:'© OpenStreetMap'}),
         'Plan': L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',
           {maxZoom:14, attribution:'© OpenStreetMap'}),
         'Relief': L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
@@ -931,10 +977,10 @@ MAP_TEMPLATE = r"""<link rel="stylesheet" href="https://cdnjs.cloudflare.com/aja
       };
       fonds['Sombre'].addTo(map);
       L.control.layers(fonds, null, {position:'topright', collapsed:true}).addTo(map);
-      var okT = 0, koT = 0;                    // si le fond sombre ne charge rien, bascule sur « Plan »
+      var okT = 0, koT = 0;                    // si le fond sombre ne charge rien, bascule sur « Relief »
       fonds['Sombre'].on('tileload', function(){ okT++; });
       fonds['Sombre'].on('tileerror', function(){
-        if (++koT >= 4 && okT === 0 && map.hasLayer(fonds['Sombre'])) { map.removeLayer(fonds['Sombre']); fonds['Plan'].addTo(map); }
+        if (++koT >= 4 && okT === 0 && map.hasLayer(fonds['Sombre'])) { map.removeLayer(fonds['Sombre']); fonds['Relief'].addTo(map); }
       });
       D.communes.forEach(function(c){
         lines.push(L.polyline([[c.lat,c.lon],[c.lat,c.lon]], {color:'#4fc3f7', weight:1, opacity:.75, interactive:false}).addTo(map));
@@ -951,8 +997,7 @@ MAP_TEMPLATE = r"""<link rel="stylesheet" href="https://cdnjs.cloudflare.com/aja
       el.classList.add('fb');
       var la = D.communes.map(function(c){return c.lat;}), lo = D.communes.map(function(c){return c.lon;});
       FB = {a:Math.min.apply(null,la), b:Math.max.apply(null,la), x0:Math.min.apply(null,lo), x1:Math.max.apply(null,lo)};
-      var ar = ((FB.x1-FB.x0)*Math.cos((FB.a+FB.b)/2*Math.PI/180))/(FB.b-FB.a);
-      var box = document.createElement('div'); box.className='fbx'; box.style.aspectRatio = String(ar);
+      var box = document.createElement('div'); box.className='fbx';
       el.appendChild(box);
       box.insertAdjacentHTML('beforeend', '<svg class="fbl"></svg>');
       D.communes.forEach(function(c){
@@ -978,15 +1023,23 @@ MAP_TEMPLATE = r"""<link rel="stylesheet" href="https://cdnjs.cloudflare.com/aja
     try { history.replaceState(null, '', v==='carte' ? '#carte' : location.pathname+location.search); } catch(e) {}
   }
   document.querySelectorAll('.tabs button').forEach(function(b){b.onclick=function(){view(b.dataset.v);};});
+  function showBul(on){                          // page « Bulletin » : remplace la carte
+    $('#mapwrap').hidden = on; $('#bulpage').hidden = !on;
+    if (!on && map) { map.invalidateSize(); layout(); }
+    try { history.replaceState(null, '', on ? '#bulletin' : '#carte'); } catch(e) {}
+  }
   document.querySelectorAll('.mapbar button').forEach(function(b){
     b.onclick = function(){
-      mode = +b.dataset.m;
+      var m = +b.dataset.m;
       document.querySelectorAll('.mapbar button').forEach(function(x){x.classList.toggle('on', x===b);});
-      refresh();
+      if (m === 4) { showBul(true); return; }
+      showBul(false); mode = m; refresh();
     };
   });
   window.addEventListener('resize', function(){ if (inited && !map) layout(); });
-  view(location.hash === '#carte' ? 'carte' : 'tableau');
+  var h0 = location.hash;
+  view(h0 === '#carte' || h0 === '#bulletin' ? 'carte' : 'tableau');
+  if (h0 === '#bulletin') { var bb = $('.mapbar button[data-m="4"]'); if (bb) bb.click(); }
 })();
 </script>
 """
@@ -1000,9 +1053,11 @@ def map_payload(rows):
         com.append({
             "name": name, "lat": la, "lon": lo,
             "ech": [{"t": e["t"], "g": e["gust"], "d": compass(e["dir"]) if e["dir"] is not None else "",
+                     "dd": round(e["dir"]) if e["dir"] is not None else None,
                      "p": e["picto"]} for e in r["ech"]],
-            "tn": r["tn"], "tx": r["tx"], "rr": round(r["rr"], 1), "gmax": r["gmax"],
-            "gd": compass(r["gmax_dir"]) if r["gmax_dir"] is not None else ""})
+            "tn": r["tn"], "tx": r["tx"], "rr": round(r["rr"], 1), "rc": classe_pluie(r["rr"]), "gmax": r["gmax"],
+            "gd": compass(r["gmax_dir"]) if r["gmax_dir"] is not None else "",
+            "gdd": round(r["gmax_dir"]) if r["gmax_dir"] is not None else None})
     codes = sorted({e["p"] for c in com for e in c["ech"]})
     data = {"communes": com, "icons": {str(k): icon_html(k) for k in codes}}
     return json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
@@ -1040,7 +1095,7 @@ def render(rows, d, generated):
         cells = "".join(f'<td class="c">{icon_html(e["picto"])}</td><td class="t">{temp_cell(e["t"])}</td>'
                         f'<td class="g">{wind_cell(e["gust"], e["dir"])}</td>' for e in r["ech"])
         mark = ' <sup title="Un seul modèle disponible">*</sup>' if partial else ""
-        rr = f'{r["rr"]:.1f}'.replace(".", ",")
+        rr = classe_pluie(r["rr"])
         body.append(
             f'<tr><th class="n">{name}{mark}</th>{cells}'
             f'<td class="x tn">{temp_cell(r["tn"])}</td><td class="x tx">{temp_cell(r["tx"])}</td>'
@@ -1107,7 +1162,7 @@ footer{{color:var(--mut);font-size:11px;margin-top:8px;line-height:1.5}}
 {carte}
 <footer>Échéances en heure locale · Tn : 18 h UTC veille → 18 h UTC · Tx : 6 h → 18 h UTC ·
 Pluie et rafale max : 18 h UTC veille → 18 h UTC · Rafales : <span class="w1"><b>≥40</b></span> <span class="w2"><b>≥60</b></span> <span class="w3"><b>≥80</b></span> km/h ·
-Fond de carte © OpenStreetMap · © CARTO · Pictogrammes © <a style="color:var(--acc)" href="https://content.meteoblue.com/en/research-education/specifications/standards/symbols-and-pictograms">meteoblue</a> · Prévisions brutes de modèles, non corrigées.</footer>
+Fond de carte © OpenStreetMap contributors · © OpenTopoMap · Pictogrammes © <a style="color:var(--acc)" href="https://content.meteoblue.com/en/research-education/specifications/standards/symbols-and-pictograms">meteoblue</a> · Prévisions brutes de modèles, non corrigées.</footer>
 </body></html>"""
 
 # ------------------------------------------------------------ MAIN --------
