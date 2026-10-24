@@ -1,0 +1,22 @@
+{
+  "_aide": "Latitude, longitude (degrés décimaux) de chaque commune. Ce fichier prime sur le code : modifiez seulement les valeurs.",
+  "Montjoyer": [44.4772, 4.8528],
+  "Donzère": [44.4425, 4.7058],
+  "Pierrelatte": [44.3775, 4.6985],
+  "Pont-St-Esprit": [44.2564, 4.6444],
+  "Bagnols/Cèze": [44.1618, 4.6194],
+  "Orange": [44.1383, 4.8089],
+  "Laudun": [44.1061, 4.6581],
+  "Sabran": [44.1517, 4.5484],
+  "Roquemaure": [44.05, 4.775],
+  "Pouzilhac": [44.042, 4.5808],
+  "Remoulins": [43.9378, 4.5636],
+  "Avignon": [43.9493, 4.8055],
+  "Beaucaire": [43.807, 4.643],
+  "Nîmes": [43.8367, 4.3601],
+  "Uzès": [44.012, 4.4196],
+  "Verfeuil": [44.17, 4.4472],
+  "Lussan": [44.154, 4.3672],
+  "Barjac": [44.305, 4.357],
+  "Alès": [44.125, 4.083]
+}
