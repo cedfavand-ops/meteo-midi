@@ -33,26 +33,54 @@ TX_START_UTC, TX_END_UTC = 6, 18       # jour J 6h -> 18h
 
 # (nom, latitude, longitude) -- coordonnées approximatives, à affiner
 STATIONS = [
-    ("Montjoyer",       44.476356947910205, 4.852038981587721),
+    ("Montjoyer",        44.4970, 4.7640),
     ("Donzère",          44.4425, 4.7058),
     ("Pierrelatte",      44.3775, 4.6985),
     ("Pont-St-Esprit",   44.2564, 4.6444),
     ("Bagnols/Cèze",     44.1618, 4.6194),
     ("Orange",           44.1383, 4.8089),
-    ("Laudun",           44.10643355789695, 4.665359786509246),
-    ("Sabran",           44.14980932231887, 4.5487614449086475),
+    ("Laudun",           44.1000, 4.6800),
+    ("Sabran",           44.1700, 4.5200),
     ("Roquemaure",       44.0500, 4.7750),
-    ("Pouzilhac",        44.03951920412046, 4.581201139502283),
+    ("Pouzilhac",        44.0200, 4.5400),
     ("Remoulins",        43.9378, 4.5636),
     ("Avignon",          43.9493, 4.8055),
     ("Beaucaire",        43.8070, 4.6430),
     ("Nîmes",            43.8367, 4.3601),
     ("Uzès",             44.0120, 4.4196),
-    ("Verfeuil",         44.16988253831315, 4.449493171258621),
-    ("Lussan",           44.15672276755803, 4.367303176608116),
+    ("Verfeuil",         44.1900, 4.4500),
+    ("Lussan",           44.2200, 4.2800),
     ("Barjac",           44.3050, 4.3570),
     ("Alès",             44.1250, 4.0830),
 ]
+
+def _charger_coordonnees(stations):
+    """Si communes.json existe à côté de previ.py, ses coordonnées priment sur celles ci-dessus
+    (on peut ainsi corriger un emplacement sans toucher au code)."""
+    f = Path(__file__).with_name("communes.json")
+    if not f.exists():
+        return stations
+    try:
+        data = json.loads(f.read_text(encoding="utf-8"))
+    except Exception as e:
+        print(f"Avertissement : communes.json illisible ({e}) ; coordonnées par défaut utilisées.", file=sys.stderr)
+        return stations
+    noms = {n for n, _, _ in stations}
+    for k in data:
+        if not k.startswith("_") and k not in noms:
+            print(f"Avertissement : « {k} » dans communes.json ne correspond à aucune commune connue (ignoré).", file=sys.stderr)
+    out = []
+    for n, la, lo in stations:
+        v = data.get(n)
+        try:
+            if v is not None:
+                la, lo = float(v[0]), float(v[1])
+        except (TypeError, ValueError, IndexError):
+            print(f"Avertissement : coordonnées invalides pour {n} dans communes.json (ignorées).", file=sys.stderr)
+        out.append((n, la, lo))
+    return out
+
+STATIONS = _charger_coordonnees(STATIONS)
 
 # Mode correctif (phase 2) : biais à retrancher/ajouter par station (°C), à alimenter
 # plus tard avec Météo-France / Infoclimat. Ex : {"Orange": {"t": -0.5}}
@@ -194,20 +222,30 @@ def fetch(d, stations=None, batch_size=5, retries=4, timeout=90):
 def demo_data():
     out, base = [], datetime.now(UTC).replace(tzinfo=None, hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
     times = [(base + timedelta(hours=i)).strftime("%Y-%m-%dT%H:%M") for i in range(24 * 5)]
+    n = len(times)
+
+    def walk(lo, hi, step):
+        v, res = random.uniform(lo, hi), []
+        for _ in range(n):
+            v = min(hi, max(lo, v + random.uniform(-step, step)))
+            res.append(v)
+        return res
+
     for _ in STATIONS:
         h = {"time": times}
+        axe = random.choice([320, 340, 150])
         for m in MODELS:
             ph = random.uniform(0, 6)
-            h[f"temperature_2m_{m}"] = [12 + 7 * math.sin((i - 9) / 24 * 2 * math.pi) + random.uniform(-1, 1) for i in range(len(times))]
-            h[f"wind_gusts_10m_{m}"] = [random.uniform(15, 70) for _ in times]
-            h[f"wind_speed_10m_{m}"] = [random.uniform(5, 40) for _ in times]
-            h[f"wind_direction_10m_{m}"] = [(300 + random.uniform(-30, 30)) % 360 for _ in times]
-            h[f"precipitation_{m}"] = [max(0, random.uniform(-1.5, 1.5)) if math.sin(i / 7 + ph) > 0.6 else 0 for i in range(len(times))]
-            h[f"cloud_cover_{m}"] = [min(100, max(0, 50 + 50 * math.sin(i / 9 + ph))) for i in range(len(times))]
-            h[f"cloud_cover_low_{m}"] = [random.uniform(0, 40) for _ in times]
-            h[f"cloud_cover_mid_{m}"] = [random.uniform(0, 40) for _ in times]
-            h[f"cloud_cover_high_{m}"] = [random.uniform(0, 60) for _ in times]
-            h[f"weather_code_{m}"] = [random.choice([0, 1, 2, 3, 61, 80, 95]) for _ in times]
+            h[f"temperature_2m_{m}"] = [12 + 7 * math.sin((i - 9) / 24 * 2 * math.pi) + random.uniform(-0.4, 0.4) for i in range(n)]
+            h[f"wind_gusts_10m_{m}"] = walk(15, 90, 7)
+            h[f"wind_speed_10m_{m}"] = walk(5, 45, 4)
+            h[f"wind_direction_10m_{m}"] = [(axe + d) % 360 for d in walk(-35, 35, 6)]
+            h[f"precipitation_{m}"] = [max(0.0, 1.6 * math.sin(i / 4 + ph)) if math.sin(i / 9 + ph) > 0.75 else 0 for i in range(n)]
+            h[f"cloud_cover_{m}"] = [min(100, max(0, 50 + 50 * math.sin(i / 9 + ph))) for i in range(n)]
+            h[f"cloud_cover_low_{m}"] = walk(0, 70, 9)
+            h[f"cloud_cover_mid_{m}"] = walk(0, 70, 9)
+            h[f"cloud_cover_high_{m}"] = walk(0, 100, 12)
+            h[f"weather_code_{m}"] = [random.choice([0, 1, 2, 3, 61, 80, 95]) for _ in range(n)]
         out.append({"hourly": h})
     return out
 
@@ -320,6 +358,27 @@ def picto(st, t0, t1):
         return 19 + cir()
     return 22
 
+def _rr(x, n=1):
+    return None if x is None else round(x, n)
+
+def hourly_series(st, d):
+    """24 valeurs horaires (heures locales 0-23 du jour d) pour l'atmogramme de la commune."""
+    out = {k: [] for k in ("t", "g", "w", "dd", "p", "cl", "cm", "ch")}
+    for h in range(24):
+        t = loc_to_utc(d, h)
+        out["t"].append(_rr(st.mean("temperature_2m", t), 1))
+        out["g"].append(_rr(st.mean("wind_gusts_10m", t), 0))
+        out["w"].append(_rr(st.mean("wind_speed_10m", t), 0))
+        dd = st.direction(t)
+        out["dd"].append(None if dd is None else int(round(dd)))
+        out["p"].append(_rr(st.mean("precipitation", t + timedelta(hours=1)), 2))   # cumul de l'heure h -> h+1
+        out["cl"].append(_rr(st.mean("cloud_cover_low", t), 0))
+        out["cm"].append(_rr(st.mean("cloud_cover_mid", t), 0))
+        out["ch"].append(_rr(st.mean("cloud_cover_high", t), 0))
+    out["pc"] = [classe_pluie(x) if x is not None else "–" for x in out["p"]]
+    out["rc"] = classe_pluie(sum(x for x in out["p"] if x is not None))
+    return out
+
 def compute(st, d):
     corr = CORRECTIONS.get(st.name, {})
     dt = corr.get("t", 0.0)
@@ -351,6 +410,7 @@ def compute(st, d):
                    key=lambda t: st.mean("wind_gusts_10m", t))
         res["gmax_dir"] = st.direction(tmax)
     res["models"] = len(st.models_used)
+    res["hourly"] = hourly_series(st, d)
     return res
 
 # ------------------------------------------------------------ BULLETIN ----
@@ -838,6 +898,20 @@ MAP_TEMPLATE = r"""<link rel="stylesheet" href="https://cdnjs.cloudflare.com/aja
 .fbm .mk{position:relative}
 .fbnote{position:absolute;left:10px;bottom:6px;font-size:11px;color:var(--mut)}
 .maphelp{color:var(--mut);font-size:12px;margin-top:6px}
+.mk{cursor:pointer}
+th.n.clk{cursor:pointer}th.n.clk:hover{color:var(--acc);text-decoration:underline}
+.atmo-bg{position:fixed;left:0;top:0;right:0;bottom:0;background:rgba(3,10,25,.76);z-index:9999;
+  display:flex;align-items:center;justify-content:center;padding:12px}
+.atmo-bg[hidden]{display:none}
+.atmo-box{position:relative;width:100%;max-width:860px;max-height:96vh;overflow:auto;
+  background:linear-gradient(180deg,#12305f,#0b1d3f);border:1px solid #2f5aa0;border-radius:12px;
+  padding:14px 18px 12px;box-shadow:0 10px 40px rgba(0,0,0,.6)}
+.atmo-box h3{margin:0 44px 6px 0;font-size:20px;color:#fff;font-weight:600}
+.atmo-box h3 span{color:var(--acc);font-weight:500;font-size:14px}
+.atmo-x{position:absolute;right:10px;top:8px;width:34px;height:34px;border-radius:50%;border:1px solid var(--line);
+  background:#0f2a55;color:#e8f0ff;font-size:20px;line-height:1;cursor:pointer}
+.atmo-x:hover{background:var(--acc);color:#06203a}
+.atmo-leg{color:var(--mut);font-size:11.5px;margin-top:6px;line-height:1.5}
 #bulpage .lit{max-width:960px;margin:8px auto 0;padding:24px 34px 14px}
 #bulpage .lit h2{font-size:22px;margin-bottom:12px}
 #bulpage .lit p{font-size:17.5px;line-height:1.75}
@@ -859,35 +933,45 @@ MAP_TEMPLATE = r"""<link rel="stylesheet" href="https://cdnjs.cloudflare.com/aja
   </div>
   <div id="mapwrap">
     <div id="map"></div>
-    <div class="maphelp">Molette ou doigts pour zoomer. Vent : rafales en km/h arrondies à la dizaine ; la flèche indique le sens vers lequel
-      souffle le vent, <b style="color:#ffd21f">jaune</b> dès 60, <b style="color:#ff9a1f">orange</b> dès 80, <b style="color:#ff3b3b">rouge</b> dès 100 km/h.
+    <div class="maphelp"><b>Cliquez sur une commune</b> pour afficher son atmogramme horaire. Molette ou doigts pour zoomer.
+      Vent : rafales en km/h arrondies à la dizaine ; la flèche indique le sens vers lequel souffle le vent, colorée selon la rafale
+      (<b style="color:#4fc3f7">bleu</b> sous 60, <b style="color:#ffd21f">jaune</b> dès 60, <b style="color:#ff9a1f">orange</b> dès 80,
+      <b style="color:#ff3b3b">rouge</b> dès 100 km/h).
       Synthèse : Tx en rouge, Tn en bleu, pluie, rafale max et pictogramme de midi.</div>
   </div>
   <div id="bulpage" hidden>
   __BULLETIN__
   </div>
 </section>
+<div id="atmo" class="atmo-bg" hidden>
+  <div class="atmo-box" role="dialog" aria-modal="true" aria-labelledby="atmo-t">
+    <button class="atmo-x" type="button" aria-label="Fermer">×</button>
+    <h3 id="atmo-t"></h3>
+    <div id="atmo-svg"></div>
+    <div class="atmo-leg">Heures locales. Les pointillés marquent les échéances 8 h, 12 h et 16 h du tableau. Nébulosité : plus la case est claire,
+      plus le ciel est couvert à cette altitude. Vent : flèche orientée vers où souffle le vent, colorée selon la rafale
+      (<b style="color:#7fa6d6">&lt; 30</b>, <b style="color:#4fc3f7">30-59</b>, <b style="color:#ffd21f">60-79</b>,
+      <b style="color:#ff9a1f">80-99</b>, <b style="color:#ff3b3b">≥ 100</b> km/h). Survolez une heure pour le détail.</div>
+  </div>
+</div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>
 (function(){
   var D = __DATA__;
   var mode = 0, map = null, inited = false, mk = [], lines = [], FB = null;
-  var SZ = [142, 142, 142, 178], W = 104;
+  var SZ = [124, 124, 124, 160], W = 104;
   function $(s){return document.querySelector(s);}
   function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;');}
   function gcls(g){return g==null?'':(g>=80?'w3':g>=60?'w2':g>=40?'w1':'');}
   function T(v){return v==null?'–':'<b>'+v+'<span class="u">°C</span></b>';}
-  function arrow(dd, g){                       // flèche épaisse, orientée vers où souffle le vent
-    if (g == null || dd == null || g < 60) return '';
-    var col = g > 99 ? '#ff3b3b' : g > 79 ? '#ff9a1f' : '#ffd21f';
+  function arrow(dd, g){                       // flèche épaisse, orientée vers où souffle le vent, colorée selon la rafale
+    if (g == null || dd == null) return '';
     return '<svg class="ar" viewBox="-12 -12 24 24" width="24" height="24" aria-hidden="true"><g transform="rotate('+Math.round((dd+180)%360)+')">'
-      + '<path d="M0,-11 L9.5,-1 L3.8,-1 L3.8,11 L-3.8,11 L-3.8,-1 L-9.5,-1 Z" fill="'+col+'" stroke="#06142b" stroke-width="1.3" stroke-linejoin="round"/></g></svg>';
+      + '<path d="M0,-11 L9.5,-1 L3.8,-1 L3.8,11 L-3.8,11 L-3.8,-1 L-9.5,-1 Z" fill="'+wcol(g)+'" stroke="#06142b" stroke-width="1.3" stroke-linejoin="round"/></g></svg>';
   }
   function wind(g, d, dd){
     if (g == null) return '<div class="mg">–</div>';
-    var ar = arrow(dd, g);                       // avec flèche : la direction passe sous la vitesse
-    return '<div class="mg">'+ar+(ar ? '<span class="wv"><b>'+g+'</b> km/h'+(d ? '<br><i>'+d+'</i>' : '')+'</span>'
-                                  : '<span><b>'+g+'</b> km/h'+(d ? ' <i>'+d+'</i>' : '')+'</span>')+'</div>';
+    return '<div class="mg">'+arrow(dd, g)+'<span><b>'+g+'</b> km/h</span></div>';
   }
   function card(c){
     var name = '<div class="mn">'+esc(c.name)+'</div>';
@@ -987,8 +1071,10 @@ MAP_TEMPLATE = r"""<link rel="stylesheet" href="https://cdnjs.cloudflare.com/aja
         lines.push(L.polyline([[c.lat,c.lon],[c.lat,c.lon]], {color:'#4fc3f7', weight:1, opacity:.75, interactive:false}).addTo(map));
         L.circleMarker([c.lat,c.lon], {radius:3, color:'#4fc3f7', weight:1, fillColor:'#4fc3f7', fillOpacity:1, interactive:false}).addTo(map);
       });
-      D.communes.forEach(function(c){
-        mk.push(L.marker([c.lat,c.lon], {icon:icon(c), keyboard:false}).addTo(map));
+      D.communes.forEach(function(c,i){
+        var mm = L.marker([c.lat,c.lon], {icon:icon(c), keyboard:false}).addTo(map);
+        mm.on('click', function(){ openAtmo(i); });
+        mk.push(mm);
       });
       map.fitBounds(L.latLngBounds(D.communes.map(function(c){return [c.lat,c.lon];})), {padding:[90,90]});
       inited = true;
@@ -1001,8 +1087,10 @@ MAP_TEMPLATE = r"""<link rel="stylesheet" href="https://cdnjs.cloudflare.com/aja
       var box = document.createElement('div'); box.className='fbx';
       el.appendChild(box);
       box.insertAdjacentHTML('beforeend', '<svg class="fbl"></svg>');
-      D.communes.forEach(function(c){
-        var d = document.createElement('div'); d.className='fbm'; d.innerHTML = card(c); box.appendChild(d); mk.push(d);
+      D.communes.forEach(function(c,i){
+        var d = document.createElement('div'); d.className='fbm'; d.innerHTML = card(c);
+        d.onclick = function(){ openAtmo(i); };
+        box.appendChild(d); mk.push(d);
       });
       var n = document.createElement('div'); n.className='fbnote';
       n.textContent = 'Carte simplifiée : fond de carte indisponible'; el.appendChild(n);
@@ -1024,6 +1112,152 @@ MAP_TEMPLATE = r"""<link rel="stylesheet" href="https://cdnjs.cloudflare.com/aja
     try { history.replaceState(null, '', v==='carte' ? '#carte' : location.pathname+location.search); } catch(e) {}
   }
   document.querySelectorAll('.tabs button').forEach(function(b){b.onclick=function(){view(b.dataset.v);};});
+  // ---------- Atmogramme horaire (24 h) d'une commune ----------
+  var DIRS = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSO','SO','OSO','O','ONO','NO','NNO'];
+  function comp(d){ return d == null ? '' : DIRS[Math.floor((((d % 360) + 360) % 360) / 22.5 + 0.5) % 16]; }
+  function nz(v){ return v != null && !isNaN(v); }
+  function r10(v){ return Math.floor(v / 10 + 0.5) * 10; }
+  function f1(v){ return Math.round(v * 10) / 10; }
+  function wcol(g){ return g == null ? '#7fa6d6' : g > 99 ? '#ff3b3b' : g > 79 ? '#ff9a1f' : g > 59 ? '#ffd21f' : g >= 30 ? '#4fc3f7' : '#7fa6d6'; }
+  function nice(lo, hi, maxTicks){
+    var span = Math.max(hi - lo, 1), steps = [1, 2, 5, 10, 20, 50, 100], st = 100;
+    for (var i = 0; i < steps.length; i++) { if (span / steps[i] <= maxTicks) { st = steps[i]; break; } }
+    var a = Math.floor(lo / st) * st, b = Math.ceil(hi / st) * st;
+    if (b <= a) b = a + st;
+    return {lo: a, hi: b, st: st};
+  }
+  function curve(P){                           // courbe lissée (Catmull-Rom converti en Bézier)
+    if (P.length < 2) return '';
+    var d = 'M' + f1(P[0][0]) + ',' + f1(P[0][1]);
+    for (var i = 0; i < P.length - 1; i++) {
+      var p0 = P[i-1] || P[i], p1 = P[i], p2 = P[i+1], p3 = P[i+2] || p2;
+      d += 'C' + f1(p1[0] + (p2[0]-p0[0])/6) + ',' + f1(p1[1] + (p2[1]-p0[1])/6) + ' '
+         + f1(p2[0] - (p3[0]-p1[0])/6) + ',' + f1(p2[1] - (p3[1]-p1[1])/6) + ' ' + f1(p2[0]) + ',' + f1(p2[1]);
+    }
+    return d;
+  }
+  function garrow(cx, cy, size, dd, col){
+    return '<g transform="translate(' + f1(cx) + ',' + cy + ') scale(' + (size/24) + ') rotate(' + Math.round((dd+180)%360) + ')">'
+      + '<path d="M0,-11 L9.5,-1 L3.8,-1 L3.8,11 L-3.8,11 L-3.8,-1 L-9.5,-1 Z" fill="' + col
+      + '" stroke="#06142b" stroke-width="1.3" stroke-linejoin="round"/></g>';
+  }
+  function atmoSVG(c){
+    var H = c.hr, x0 = 54, x1 = 748, sw = (x1 - x0) / 24, o = [];
+    function X(h){ return f1(x0 + (h + 0.5) * sw); }
+    function tx(x, y, s, col, size, anchor, extra){
+      return '<text x="' + x + '" y="' + f1(y) + '" fill="' + col + '" font-size="' + size + '" text-anchor="' + (anchor || 'start') + '"' + (extra || '') + '>' + s + '</text>';
+    }
+    var BOLD = ' font-weight="600"';
+    o.push('<svg viewBox="0 0 760 500" width="100%" role="img" aria-label="Atmogramme de ' + esc(c.name) + '" style="display:block">');
+    o.push('<defs><linearGradient id="gT" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4fc3f7" stop-opacity=".5"/>'
+         + '<stop offset="1" stop-color="#4fc3f7" stop-opacity="0"/></linearGradient></defs>');
+    for (var h = 0; h < 24; h += 3) {          // grille verticale + heures
+      o.push('<line x1="' + X(h) + '" y1="48" x2="' + X(h) + '" y2="446" stroke="#fff" stroke-opacity=".07"/>');
+      o.push(tx(X(h), 488, h + ' h', '#9db8e6', 11, 'middle'));
+    }
+    [8, 12, 16].forEach(function(e){            // échéances du tableau
+      o.push('<line x1="' + X(e) + '" y1="44" x2="' + X(e) + '" y2="446" stroke="#4fc3f7" stroke-opacity=".4" stroke-dasharray="3 4"/>');
+      o.push(tx(X(e), 38, e + ' h', '#4fc3f7', 10, 'middle'));
+    });
+    // --- Température
+    var A0 = 54, A1 = 178, tv = H.t.filter(nz);
+    o.push(tx(x0, 20, 'Température (°C)', '#e8f0ff', 12.5, 'start', BOLD));
+    if (tv.length) {
+      var sc = nice(Math.min.apply(null, tv) - 0.5, Math.max.apply(null, tv) + 0.5, 5);
+      var YT = function(v){ return f1(A1 - (v - sc.lo) / (sc.hi - sc.lo) * (A1 - A0)); };
+      for (var v = sc.lo; v <= sc.hi + 1e-9; v += sc.st) {
+        o.push('<line x1="' + x0 + '" y1="' + YT(v) + '" x2="' + x1 + '" y2="' + YT(v) + '" stroke="#fff" stroke-opacity=".10"/>');
+        o.push(tx(x0 - 7, YT(v) + 4, v, '#9db8e6', 11, 'end'));
+      }
+      var P = []; H.t.forEach(function(t, k){ if (nz(t)) P.push([X(k), YT(t)]); });
+      o.push('<path d="' + curve(P) + ' L' + P[P.length-1][0] + ',' + A1 + ' L' + P[0][0] + ',' + A1 + ' Z" fill="url(#gT)"/>');
+      o.push('<path d="' + curve(P) + '" fill="none" stroke="#4fc3f7" stroke-width="2.6" stroke-linejoin="round"/>');
+      var tmax = Math.max.apply(null, tv), tmin = Math.min.apply(null, tv), imax = H.t.indexOf(tmax), imin = H.t.indexOf(tmin);
+      var lab = [8, 12, 16], ext = {};
+      [[imax, '#ff7b5c', -9], [imin, '#7fd4ff', 18]].forEach(function(e){
+        if (e[0] >= 0 && lab.every(function(l){ return Math.abs(l - e[0]) >= 2; }) && !ext[e[0]]) { ext[e[0]] = e; lab.push(e[0]); }
+      });
+      H.t.forEach(function(t, k){
+        if (!nz(t)) return;
+        var big = lab.indexOf(k) >= 0, e = ext[k];
+        o.push('<circle cx="' + X(k) + '" cy="' + YT(t) + '" r="' + (big ? 4 : 2) + '" fill="' + (big ? '#fff' : '#4fc3f7') + '" stroke="#06142b" stroke-width="' + (big ? 1.5 : 0) + '"/>');
+        if (big) o.push(tx(X(k), YT(t) + (e ? e[2] : -9), Math.round(t) + '°', e ? e[1] : '#fff', 12.5, 'middle', ' font-weight="700"'));
+      });
+    }
+    // --- Nébulosité par altitude
+    o.push(tx(x0, 206, 'Nébulosité par altitude', '#e8f0ff', 12.5, 'start', BOLD));
+    [['Haute', 'ch'], ['Moyenne', 'cm'], ['Basse', 'cl']].forEach(function(r, k){
+      var y = 214 + k * 17;
+      o.push(tx(x0 - 7, y + 10.5, r[0], '#9db8e6', 10.5, 'end'));
+      o.push('<rect x="' + x0 + '" y="' + y + '" width="' + (x1 - x0) + '" height="14" rx="3" fill="#fff" fill-opacity=".05"/>');
+      H[r[1]].forEach(function(v, k2){
+        if (nz(v)) o.push('<rect x="' + f1(x0 + k2 * sw + 0.6) + '" y="' + y + '" width="' + f1(sw - 1.2) + '" height="14" rx="2" fill="#dfeaff" fill-opacity="'
+          + (0.07 + 0.88 * Math.min(100, Math.max(0, v)) / 100).toFixed(2) + '"/>');
+      });
+    });
+    // --- Précipitations
+    var C0 = 292, C1 = 346, pv = H.p.map(function(v){ return nz(v) ? v : 0; }), pm = Math.max.apply(null, pv);
+    var topP = pm <= 1 ? 1 : pm <= 2 ? 2 : pm <= 5 ? 5 : pm <= 10 ? 10 : pm <= 20 ? 20 : Math.ceil(pm / 10) * 10;
+    o.push(tx(x0, 282, 'Précipitations (mm par heure)', '#e8f0ff', 12.5, 'start', BOLD));
+    o.push(tx(x1, 282, 'Cumul de la journée : ' + (H.rc || '–') + ' mm', '#9ad0ff', 11.5, 'end'));
+    [0, topP].forEach(function(v){
+      var y = f1(C1 - v / topP * (C1 - C0));
+      o.push('<line x1="' + x0 + '" y1="' + y + '" x2="' + x1 + '" y2="' + y + '" stroke="#fff" stroke-opacity=".10"/>');
+      o.push(tx(x0 - 7, y + 4, v, '#9db8e6', 11, 'end'));
+    });
+    H.p.forEach(function(v, k){
+      if (!nz(v) || v <= 0.02) return;
+      var bh = Math.max(1.5, v / topP * (C1 - C0));
+      o.push('<rect x="' + f1(X(k) - sw * 0.34) + '" y="' + f1(C1 - bh) + '" width="' + f1(sw * 0.68) + '" height="' + f1(bh) + '" rx="1.5" fill="#5cb8ff" fill-opacity=".92"/>');
+    });
+    // --- Vent
+    var D0 = 376, D1 = 438, gv = H.g.filter(nz), gm = gv.length ? Math.max.apply(null, gv) : 0, topG = Math.max(40, Math.ceil(gm / 20) * 20);
+    var YG = function(v){ return f1(D1 - Math.min(v, topG) / topG * (D1 - D0)); };
+    o.push(tx(x0, 366, 'Vent à 10 m (km/h)', '#e8f0ff', 12.5, 'start', BOLD));
+    o.push(tx(x1, 366, 'barres : rafales · trait blanc : vent moyen · flèches : sens du vent', '#9db8e6', 11, 'end'));
+    [0, topG / 2, topG].forEach(function(v){
+      o.push('<line x1="' + x0 + '" y1="' + YG(v) + '" x2="' + x1 + '" y2="' + YG(v) + '" stroke="#fff" stroke-opacity=".10"/>');
+      o.push(tx(x0 - 7, YG(v) + 4, v, '#9db8e6', 11, 'end'));
+    });
+    H.g.forEach(function(g, k){
+      if (!nz(g)) return;
+      o.push('<rect x="' + f1(X(k) - sw * 0.34) + '" y="' + YG(g) + '" width="' + f1(sw * 0.68) + '" height="' + f1(D1 - YG(g)) + '" rx="1.5" fill="' + wcol(g) + '" fill-opacity=".85"/>');
+      if (k % 3 === 0) o.push(tx(X(k), Math.max(D0 - 2, YG(g) - 4), r10(g), '#fff', 10.5, 'middle'));
+    });
+    var PW = []; H.w.forEach(function(w, k){ if (nz(w)) PW.push([X(k), YG(w)]); });
+    if (PW.length > 1) o.push('<path d="' + curve(PW) + '" fill="none" stroke="#fff" stroke-width="1.8" stroke-opacity=".9" stroke-linejoin="round"/>');
+    H.dd.forEach(function(dd, k){
+      if (nz(dd) && nz(H.g[k])) o.push(garrow(X(k), 456, 17, dd, wcol(H.g[k])));
+    });
+    // --- survol : détail de chaque heure
+    for (var k = 0; k < 24; k++) {
+      var cl = function(a){ return nz(a) ? Math.round(a) : '–'; };
+      var title = k + ' h : ' + (nz(H.t[k]) ? Math.round(H.t[k]) + ' °C' : '–')
+        + ' · rafales ' + (nz(H.g[k]) ? r10(H.g[k]) + ' km/h ' + comp(H.dd[k]) : '–')
+        + ' · vent moyen ' + (nz(H.w[k]) ? Math.round(H.w[k]) + ' km/h' : '–')
+        + ' · pluie ' + (H.pc ? H.pc[k] : '–') + ' mm'
+        + ' · nuages haut/moyen/bas ' + cl(H.ch[k]) + '/' + cl(H.cm[k]) + '/' + cl(H.cl[k]) + ' %';
+      o.push('<rect x="' + f1(x0 + k * sw) + '" y="44" width="' + f1(sw) + '" height="402" style="fill:transparent;pointer-events:all"><title>' + esc(title) + '</title></rect>');
+    }
+    o.push('</svg>');
+    return o.join('');
+  }
+  function openAtmo(i){
+    var c = D.communes[i]; if (!c) return;
+    $('#atmo-t').innerHTML = esc(c.name) + ' <span>· atmogramme du ' + esc((D.jour || '').toLowerCase()) + ' (heure locale)</span>';
+    $('#atmo-svg').innerHTML = c.hr ? atmoSVG(c) : '<p style="color:#9db8e6">Données horaires indisponibles.</p>';
+    $('#atmo').hidden = false;
+    $('.atmo-x').focus();
+  }
+  function closeAtmo(){ $('#atmo').hidden = true; }
+  $('.atmo-x').onclick = closeAtmo;
+  $('#atmo').onclick = function(e){ if (e.target === this) closeAtmo(); };
+  document.addEventListener('keydown', function(e){ if (e.key === 'Escape') closeAtmo(); });
+  document.querySelectorAll('#vue-tableau th.clk').forEach(function(th){
+    var i = D.communes.findIndex(function(c){ return c.name === th.dataset.n; });
+    th.onclick = function(){ if (i >= 0) openAtmo(i); };
+    th.onkeydown = function(e){ if ((e.key === 'Enter' || e.key === ' ') && i >= 0) { e.preventDefault(); openAtmo(i); } };
+  });
   function showBul(on){                          // page « Bulletin » : remplace la carte
     $('#mapwrap').hidden = on; $('#bulpage').hidden = !on;
     if (!on && map) { map.invalidateSize(); layout(); }
@@ -1045,7 +1279,7 @@ MAP_TEMPLATE = r"""<link rel="stylesheet" href="https://cdnjs.cloudflare.com/aja
 </script>
 """
 
-def map_payload(rows):
+def map_payload(rows, d):
     """Données des communes pour la carte (JSON injecté dans la page)."""
     coords = {n: (la, lo) for n, la, lo in STATIONS}
     com = []
@@ -1058,9 +1292,11 @@ def map_payload(rows):
                      "p": e["picto"]} for e in r["ech"]],
             "tn": r["tn"], "tx": r["tx"], "rr": round(r["rr"], 1), "rc": classe_pluie(r["rr"]), "gmax": r["gmax"],
             "gd": compass(r["gmax_dir"]) if r["gmax_dir"] is not None else "",
-            "gdd": round(r["gmax_dir"]) if r["gmax_dir"] is not None else None})
+            "gdd": round(r["gmax_dir"]) if r["gmax_dir"] is not None else None,
+            "hr": r.get("hourly")})
     codes = sorted({e["p"] for c in com for e in c["ech"]})
-    data = {"communes": com, "icons": {str(k): icon_html(k) for k in codes}}
+    data = {"jour": f"{JOURS[d.weekday()].capitalize()} {d.day} {MOIS[d.month-1]}", "communes": com,
+            "icons": {str(k): icon_html(k) for k in codes}}
     return json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
 
 # ------------------------------------------------------------ RENDU -------
@@ -1112,12 +1348,12 @@ def render(rows, d, generated):
         mark = ' <sup title="Un seul modèle disponible">*</sup>' if partial else ""
         rr = classe_pluie(r["rr"])
         body.append(
-            f'<tr><th class="n">{name}{mark}</th>{cells}'
+            f'<tr><th class="n clk" data-n="{name}" tabindex="0" role="button" title="Cliquer pour l’atmogramme">{name}{mark}</th>{cells}'
             f'<td class="x tn">{temp_cell(r["tn"])}</td><td class="x tx">{temp_cell(r["tx"])}</td>'
             f'<td class="x rr">{rr} <small>mm</small></td>'
             f'<td class="x g">{wind_cell(r["gmax"], r["gmax_dir"])}</td></tr>')
     tabs = TABS
-    carte = MAP_TEMPLATE.replace("__DATA__", map_payload(rows)).replace("__BULLETIN__", bulletin_litteraire(rows, d))
+    carte = MAP_TEMPLATE.replace("__DATA__", map_payload(rows, d)).replace("__BULLETIN__", bulletin_litteraire(rows, d))
     titre = f"{JOURS[d.weekday()].capitalize()} {d.day} {MOIS[d.month-1]} {d.year}"
     return f"""<!DOCTYPE html>
 <html lang="fr"><head><meta charset="utf-8">
