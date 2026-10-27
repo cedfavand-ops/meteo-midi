@@ -11,6 +11,7 @@ Usage :
 Cron conseillé (17h45 locale) :
     45 17 * * *  cd /chemin/previ_gard && python3 previ.py
 """
+from html import escape as hesc
 import argparse, json, math, random, shutil, sys, time, urllib.error, urllib.parse, urllib.request
 from datetime import datetime, date, timedelta, timezone
 from pathlib import Path
@@ -54,33 +55,62 @@ STATIONS = [
     ("Alès",             44.1250, 4.0830),
 ]
 
-def _charger_coordonnees(stations):
-    """Si communes.json existe à côté de previ.py, ses coordonnées priment sur celles ci-dessus
-    (on peut ainsi corriger un emplacement sans toucher au code)."""
+ZONE_DEMANDEE = {}      # commune -> zone indiquée dans communes.json (facultatif)
+
+def _lire_coordonnee(v):
+    """Accepte [lat, lon], [lat, lon, "zone"], {"lat":…, "lon":…} (ou latitude/longitude) ; virgule décimale tolérée."""
+    zone = None
+    if isinstance(v, dict):
+        la, lo = v.get("lat", v.get("latitude")), v.get("lon", v.get("lng", v.get("longitude")))
+        zone = v.get("zone")
+    elif isinstance(v, (list, tuple)) and len(v) >= 2:
+        la, lo = v[0], v[1]
+        zone = v[2] if len(v) > 2 else None
+    else:
+        raise ValueError("format non reconnu")
+    la, lo = (float(str(x).replace(",", ".")) for x in (la, lo))
+    if not (-90 <= la <= 90 and -180 <= lo <= 180):
+        raise ValueError("coordonnées hors limites")
+    return la, lo, zone
+
+def _charger_stations(defaut):
+    """communes.json (s'il existe) est la liste COMPLÈTE des communes affichées, dans cet ordre :
+    ajouter une ligne ajoute une commune, en supprimer une la retire."""
     f = Path(__file__).with_name("communes.json")
     if not f.exists():
-        return stations
+        return defaut
     try:
         data = json.loads(f.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            raise ValueError("le fichier doit contenir un objet { \"Commune\": [lat, lon], … }")
     except Exception as e:
-        print(f"Avertissement : communes.json illisible ({e}) ; coordonnées par défaut utilisées.", file=sys.stderr)
-        return stations
-    noms = {n for n, _, _ in stations}
-    for k in data:
-        if not k.startswith("_") and k not in noms:
-            print(f"Avertissement : « {k} » dans communes.json ne correspond à aucune commune connue (ignoré).", file=sys.stderr)
+        print(f"Avertissement : communes.json illisible ({e}) ; liste par défaut utilisée.", file=sys.stderr)
+        return defaut
+    connus = {n: (la, lo) for n, la, lo in defaut}
     out = []
-    for n, la, lo in stations:
-        v = data.get(n)
+    for nom, v in data.items():
+        nom = str(nom)
+        if nom.startswith("_"):
+            continue
         try:
-            if v is not None:
-                la, lo = float(v[0]), float(v[1])
-        except (TypeError, ValueError, IndexError):
-            print(f"Avertissement : coordonnées invalides pour {n} dans communes.json (ignorées).", file=sys.stderr)
-        out.append((n, la, lo))
+            la, lo, zone = _lire_coordonnee(v)
+        except Exception as e:
+            print(f"Avertissement : coordonnées invalides pour « {nom} » dans communes.json ({e}).", file=sys.stderr)
+            if nom not in connus:
+                continue
+            (la, lo), zone = connus[nom], None
+        out.append((nom, la, lo))
+        if zone:
+            ZONE_DEMANDEE[nom] = str(zone)
+    if not out:
+        print("Avertissement : aucune commune valide dans communes.json ; liste par défaut utilisée.", file=sys.stderr)
+        return defaut
+    ajoutees = [n for n, _, _ in out if n not in connus]
+    if ajoutees:
+        print("Communes ajoutées via communes.json : " + ", ".join(ajoutees), file=sys.stderr)
     return out
 
-STATIONS = _charger_coordonnees(STATIONS)
+STATIONS = _charger_stations(STATIONS)
 
 # Mode correctif (phase 2) : biais à retrancher/ajouter par station (°C), à alimenter
 # plus tard avec Météo-France / Infoclimat. Ex : {"Orange": {"t": -0.5}}
@@ -318,7 +348,8 @@ def picto(st, t0, t1):
     cc, cl, cm, ch = sky_stats(st, t0, t1)
     ch = ch or 0.0
     op = opaque_cover(cc, cl, cm, ch)
-    p = sum(x for t in hrs[1:] if (x := st.mean("precipitation", t)) is not None)
+    # cumul ramené à l'équivalent de 4 h : identique pour les fenêtres du tableau (4 pas), adapté à l'heure seule
+    p = sum(x for t in hrs[1:] if (x := st.mean("precipitation", t)) is not None) * 4 / max(len(hrs) - 1, 1)
     temps = [x for t in hrs if (x := st.mean("temperature_2m", t)) is not None]
     codes = [c for t in hrs for c in st.codes(t)]
 
@@ -358,14 +389,34 @@ def picto(st, t0, t1):
         return 19 + cir()
     return 22
 
+def sun_times_utc(lat, lon, d):
+    """Lever et coucher du soleil (datetimes UTC naïfs) le jour d ; formules NOAA simplifiées (± 2 min)."""
+    g = 2 * math.pi / 365 * (d.timetuple().tm_yday - 1 + 0.5)
+    eqt = 229.18 * (0.000075 + 0.001868 * math.cos(g) - 0.032077 * math.sin(g)
+                    - 0.014615 * math.cos(2 * g) - 0.040849 * math.sin(2 * g))
+    decl = (0.006918 - 0.399912 * math.cos(g) + 0.070257 * math.sin(g) - 0.006758 * math.cos(2 * g)
+            + 0.000907 * math.sin(2 * g) - 0.002697 * math.cos(3 * g) + 0.00148 * math.sin(3 * g))
+    la = math.radians(lat)
+    c = math.cos(math.radians(90.833)) / (math.cos(la) * math.cos(decl)) - math.tan(la) * math.tan(decl)
+    if not -1 <= c <= 1:
+        return None
+    ha = math.degrees(math.acos(c))
+    base = datetime(d.year, d.month, d.day)
+    return (base + timedelta(minutes=720 - 4 * (lon + ha) - eqt),
+            base + timedelta(minutes=720 - 4 * (lon - ha) - eqt))
+
 def _rr(x, n=1):
     return None if x is None else round(x, n)
 
 def hourly_series(st, d):
     """24 valeurs horaires (heures locales 0-23 du jour d) pour l'atmogramme de la commune."""
-    out = {k: [] for k in ("t", "g", "w", "dd", "p", "cl", "cm", "ch")}
+    out = {k: [] for k in ("t", "g", "w", "dd", "p", "cl", "cm", "ch", "pi", "nu")}
+    coords = {n: (la, lo) for n, la, lo in STATIONS}.get(st.name)
+    soleil = sun_times_utc(coords[0], coords[1], d) if coords else None
     for h in range(24):
         t = loc_to_utc(d, h)
+        out["pi"].append(picto(st, t, t + timedelta(hours=1)))          # ciel de l'heure h -> h+1
+        out["nu"].append(0 if soleil is None or soleil[0] <= t + timedelta(minutes=30) <= soleil[1] else 1)
         out["t"].append(_rr(st.mean("temperature_2m", t), 1))
         out["g"].append(_rr(st.mean("wind_gusts_10m", t), 0))
         out["w"].append(_rr(st.mean("wind_speed_10m", t), 0))
@@ -375,6 +426,7 @@ def hourly_series(st, d):
         out["cl"].append(_rr(st.mean("cloud_cover_low", t), 0))
         out["cm"].append(_rr(st.mean("cloud_cover_mid", t), 0))
         out["ch"].append(_rr(st.mean("cloud_cover_high", t), 0))
+    out["sun"] = [x.replace(tzinfo=UTC).astimezone(PARIS).strftime("%H:%M") for x in soleil] if soleil else None
     out["pc"] = [classe_pluie(x) if x is not None else "–" for x in out["p"]]
     out["rc"] = classe_pluie(sum(x for x in out["p"] if x is not None))
     return out
@@ -527,6 +579,30 @@ ZONES = {
     "les garrigues": ["Nîmes", "Uzès", "Remoulins", "Pouzilhac", "Verfeuil", "Sabran"],
     "le piémont cévenol": ["Lussan", "Barjac", "Alès"],
 }
+def _completer_zones():
+    """Retire des zones les communes absentes de la liste et rattache chaque commune ajoutée à sa zone
+    (celle indiquée dans communes.json, sinon celle de la commune la plus proche)."""
+    coords = {n: (la, lo) for n, la, lo in STATIONS}
+    for z in list(ZONES):
+        ZONES[z] = [m for m in ZONES[z] if m in coords]
+        if not ZONES[z]:
+            del ZONES[z]
+    connus = {m: z for z, mem in ZONES.items() for m in mem}
+    for n, la, lo in STATIONS:
+        if n in connus:
+            continue
+        voulu = ZONE_DEMANDEE.get(n, "").strip().lower()
+        zone = next((z for z in ZONES if voulu and (voulu == z.lower() or voulu in z.lower())), None)
+        if zone is None and connus:
+            kx = math.cos(math.radians(la))
+            proche = min(connus, key=lambda m: (coords[m][0] - la) ** 2 + ((coords[m][1] - lo) * kx) ** 2)
+            zone = connus[proche]
+        if zone is None:
+            zone = "le secteur"
+            ZONES.setdefault(zone, [])
+        ZONES[zone].append(n)
+
+_completer_zones()
 CIRRUS = {2, 3, 5, 6, 8, 9, 11, 12, 14, 15, 17, 18, 20, 21}
 
 def deg(v):
@@ -855,18 +931,26 @@ def bulletin_litteraire(rows, d):
         return ""
 
 # ------------------------------------------------------------ CARTE -------
-TABS = ('<nav class="tabs"><button data-v="tableau" class="on">Tableau</button>'
-        '<button data-v="carte">Carte</button></nav>')
+TABS = ('<nav class="tabs"><button data-v="tableau" class="on">Tableau</button><button data-v="carte">Carte</button>'
+        '<span class="tsep" id="tsep" hidden></span>'
+        '<div class="mapbar" id="mapbar" hidden><button data-m="0" class="on">8 h</button><button data-m="1">12 h</button>'
+        '<button data-m="2">16 h</button><button data-m="3">Synthèse 24 h</button><button data-m="4">Bulletin</button></div>'
+        '<div class="mapctl" id="mapctl" hidden><button type="button" id="b-dens" title="Taille des cadres de commune">Cadres : auto</button>'
+        '<button type="button" id="b-fit" title="Revenir à la vue d’ensemble">Tout voir</button>'
+        '<button type="button" id="b-fs" title="Carte en plein écran">Plein écran</button></div></nav>')
 
 MAP_TEMPLATE = r"""<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
 <style>
-.tabs{display:flex;gap:8px;margin:0 0 10px}
+.tabs{display:flex;gap:8px;margin:0 0 8px;flex-wrap:wrap;align-items:center}
+.tsep{width:1px;height:24px;background:var(--line);margin:0 4px}
+.tsep[hidden],.mapbar[hidden],.mapctl[hidden]{display:none}
+.mapctl{display:flex;gap:6px;margin-left:auto;flex-wrap:wrap}
 .tabs button,.mapbar button{background:#0f2a55;color:var(--mut);border:1px solid var(--line);border-radius:999px;
   padding:6px 18px;font-size:13px;cursor:pointer;font-family:inherit}
 .tabs button.on,.mapbar button.on{background:var(--acc);color:#06203a;border-color:var(--acc);font-weight:600}
-.mapbar{display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap}
-#map{height:calc(100vh - 290px);min-height:540px;border-radius:10px;border:1px solid var(--line);
+.mapbar{display:flex;gap:6px;flex-wrap:wrap}
+#map{height:calc(100vh - 225px);min-height:460px;border-radius:10px;border:1px solid var(--line);
   background:#0b1d3a;position:relative;overflow:hidden}
 #map.leaflet-container{background:#0b1d3a;font-family:inherit}
 .mkw{background:none;border:0}
@@ -876,7 +960,7 @@ MAP_TEMPLATE = r"""<link rel="stylesheet" href="https://cdnjs.cloudflare.com/aja
 .leaflet-control-attribution{background:rgba(9,25,52,.75)!important;color:#9db8e6!important}
 .leaflet-control-attribution a{color:#4fc3f7!important}
 .mk{position:absolute;left:0;right:0;bottom:0;box-sizing:border-box;display:flex;flex-direction:column;align-items:center;
-  background:rgba(9,25,52,.94);border:1px solid #2f5aa0;border-radius:11px;color:#e8f0ff;line-height:1.15;
+  background:rgba(9,25,52,.86);border:1px solid #2f5aa0;border-radius:11px;color:#e8f0ff;line-height:1.15;
   text-align:center;box-shadow:0 2px 9px rgba(0,0,0,.6);padding:5px 5px 6px}
 .mk::after{content:"";position:absolute;left:50%;bottom:-7px;margin-left:-6px;border:6px solid transparent;
   border-bottom:0;border-top:7px solid #2f5aa0}
@@ -890,6 +974,24 @@ MAP_TEMPLATE = r"""<link rel="stylesheet" href="https://cdnjs.cloudflare.com/aja
 .mk .mg{display:flex;align-items:center;justify-content:center;gap:4px;font-size:11px;color:#cfe0ff;white-space:nowrap;margin-top:2px}
 .mk .mg b{font-size:14px;color:#fff}.mk .mg i{font-style:normal;color:#8fd3ff}
 .mk .ar{flex:none;display:block}
+.mk .row{display:flex;align-items:center;justify-content:center;gap:5px;margin:2px 0}
+.mk .tt{display:flex;flex-direction:column;align-items:center;line-height:1.05}
+.mk.sm{padding:3px 4px 4px;border-radius:9px}
+.mk.sm .mn{font-size:11.5px;line-height:14px}
+.mk.sm .mi{height:30px;margin:0}.mk.sm .pic{height:30px}.mk.sm .emo{font-size:24px;line-height:30px}
+.mk.sm .mt b{font-size:18px}.mk.sm .mt.tx b{font-size:19px}.mk.sm .mt.tn b{font-size:13px}
+.mk.sm .mr{font-size:9.5px;margin-top:0}
+.mk.sm .mg{font-size:10px;margin-top:1px;gap:3px}.mk.sm .mg b{font-size:12.5px}
+.mk.sm .ar{width:18px;height:18px}
+body.mapfs{padding:0;overflow:hidden}
+body.mapfs header,body.mapfs footer,body.mapfs #vue-tableau,body.mapfs .maphelp{display:none}
+body.mapfs .tabs{position:fixed;left:0;top:0;right:0;z-index:5001;margin:0;padding:8px 10px;background:#0a1c3b;border-bottom:1px solid var(--line)}
+body.mapfs #vue-carte{position:fixed;left:0;right:0;bottom:0;top:52px;z-index:5000;background:#0a1c3b;padding:6px 8px 8px;
+  display:flex;flex-direction:column}
+body.mapfs #vue-carte[hidden]{display:none}
+body.mapfs #mapwrap{flex:1;display:flex;flex-direction:column;min-height:0}
+body.mapfs #map{flex:1;height:auto;min-height:0}
+body.mapfs #bulpage{flex:1;overflow:auto}
 .mk .wv{text-align:left;line-height:1.2}
 #map.fb{background:radial-gradient(circle at 50% 40%,#12305f,#0a1c3b 75%)}
 .fbx{position:absolute;left:0;top:0;right:0;bottom:0}
@@ -927,17 +1029,11 @@ th.n.clk{cursor:pointer}th.n.clk:hover{color:var(--acc);text-decoration:underlin
 </style>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><filter id="fond-sombre" color-interpolation-filters="sRGB"><feColorMatrix type="matrix" values="-0.2551 -0.8582 -0.0866 0.0000 1.2392 -0.2750 -0.9250 -0.0934 0.0000 1.3953 -0.2778 -0.9345 -0.0943 0.0000 1.5184 0.0000 0.0000 0.0000 1.0000 0.0000"/></filter></svg>
 <section id="vue-carte" hidden>
-  <div class="mapbar">
-    <button data-m="0" class="on">8 h</button><button data-m="1">12 h</button>
-    <button data-m="2">16 h</button><button data-m="3">Synthèse 24 h</button><button data-m="4">Bulletin</button>
-  </div>
   <div id="mapwrap">
     <div id="map"></div>
-    <div class="maphelp"><b>Cliquez sur une commune</b> pour afficher son atmogramme horaire. Molette ou doigts pour zoomer.
-      Vent : rafales en km/h arrondies à la dizaine ; la flèche indique le sens vers lequel souffle le vent, colorée selon la rafale
-      (<b style="color:#4fc3f7">bleu</b> sous 60, <b style="color:#ffd21f">jaune</b> dès 60, <b style="color:#ff9a1f">orange</b> dès 80,
-      <b style="color:#ff3b3b">rouge</b> dès 100 km/h).
-      Synthèse : Tx en rouge, Tn en bleu, pluie, rafale max et pictogramme de midi.</div>
+    <div class="maphelp"><b>Cliquez sur une commune</b> pour son atmogramme horaire · flèche = sens vers lequel souffle le vent, colorée selon la
+      rafale (<b style="color:#4fc3f7">bleu</b> sous 60, <b style="color:#ffd21f">jaune</b> dès 60, <b style="color:#ff9a1f">orange</b> dès 80,
+      <b style="color:#ff3b3b">rouge</b> dès 100 km/h ; rafales arrondies à la dizaine) · Synthèse : Tx en rouge, Tn en bleu.</div>
   </div>
   <div id="bulpage" hidden>
   __BULLETIN__
@@ -948,7 +1044,7 @@ th.n.clk{cursor:pointer}th.n.clk:hover{color:var(--acc);text-decoration:underlin
     <button class="atmo-x" type="button" aria-label="Fermer">×</button>
     <h3 id="atmo-t"></h3>
     <div id="atmo-svg"></div>
-    <div class="atmo-leg">Heures locales. Les pointillés marquent les échéances 8 h, 12 h et 16 h du tableau. Nébulosité : plus la case est claire,
+    <div class="atmo-leg">Heures locales ; fond assombri la nuit. Pictogrammes : ciel de chaque heure (de nuit, les versions « night » du dossier icons si elles existent, sinon les pictogrammes de jour estompés). Les pointillés marquent les échéances 8 h, 12 h et 16 h du tableau. Nébulosité : plus la case est claire,
       plus le ciel est couvert à cette altitude. Vent : flèche orientée vers où souffle le vent, colorée selon la rafale
       (<b style="color:#7fa6d6">&lt; 30</b>, <b style="color:#4fc3f7">30-59</b>, <b style="color:#ffd21f">60-79</b>,
       <b style="color:#ff9a1f">80-99</b>, <b style="color:#ff3b3b">≥ 100</b> km/h). Survolez une heure pour le détail.</div>
@@ -959,7 +1055,9 @@ th.n.clk{cursor:pointer}th.n.clk:hover{color:var(--acc);text-decoration:underlin
 (function(){
   var D = __DATA__;
   var mode = 0, map = null, inited = false, mk = [], lines = [], FB = null;
-  var SZ = [124, 124, 124, 160], W = 104;
+  var DENS = {sm:{w:92, h:[82,82,82,100]}, lg:{w:104, h:[136,136,136,170]}}, pref = 'auto', curD = 'sm', BOUNDS = null;
+  function wantDens(){ if (pref !== 'auto') return pref === 'compact' ? 'sm' : 'lg'; return (map && map.getZoom() >= 10.75) ? 'lg' : 'sm'; }
+  function dims(){ var d = DENS[curD]; return {w:d.w, h:d.h[mode]}; }
   function $(s){return document.querySelector(s);}
   function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;');}
   function gcls(g){return g==null?'':(g>=80?'w3':g>=60?'w2':g>=40?'w1':'');}
@@ -974,16 +1072,15 @@ th.n.clk{cursor:pointer}th.n.clk:hover{color:var(--acc);text-decoration:underlin
     return '<div class="mg">'+arrow(dd, g)+'<span><b>'+g+'</b> km/h</span></div>';
   }
   function card(c){
+    var sm = curD === 'sm', cl = sm ? 'mk sm' : 'mk';
     var name = '<div class="mn">'+esc(c.name)+'</div>';
     if (mode < 3) {
-      var e = c.ech[mode];
-      return '<div class="mk">'+name+'<div class="mi">'+(D.icons[e.p]||'')+'</div><div class="mt">'+T(e.t)+'</div>'
-        + wind(e.g, e.d, e.dd)+'</div>';
+      var e = c.ech[mode], ic = '<div class="mi">'+(D.icons[e.p]||'')+'</div>', tt = '<div class="mt">'+T(e.t)+'</div>';
+      return '<div class="'+cl+'">'+name+(sm ? '<div class="row">'+ic+tt+'</div>' : ic+tt)+wind(e.g, e.d, e.dd)+'</div>';
     }
     var rr = (c.rr!=null && c.rr>=0.1) ? '<div class="mr">'+c.rc+' mm</div>' : '';
-    return '<div class="mk">'+name+'<div class="mi">'+(D.icons[c.ech[1].p]||'')+'</div>'
-      + '<div class="mt tx">'+T(c.tx)+'</div><div class="mt tn">'+T(c.tn)+'</div>'+rr
-      + wind(c.gmax, c.gd, c.gdd)+'</div>';
+    var ic2 = '<div class="mi">'+(D.icons[c.ech[1].p]||'')+'</div>', tx = '<div class="mt tx">'+T(c.tx)+'</div>', tn = '<div class="mt tn">'+T(c.tn)+'</div>';
+    return '<div class="'+cl+'">'+name+(sm ? '<div class="row">'+ic2+'<div class="tt">'+tx+tn+'</div></div>' : ic2+tx+tn)+rr+wind(c.gmax, c.gd, c.gdd)+'</div>';
   }
   // Écarte les cartes qui se chevauchent. P = positions réelles (px) ; renvoie le bas-centre de chaque carte.
   function declutter(P, w, h, bnd){
@@ -1008,11 +1105,12 @@ th.n.clk{cursor:pointer}th.n.clk:hover{color:var(--acc);text-decoration:underlin
     return C;
   }
   function icon(c){
-    return L.divIcon({className:'mkw', html:card(c), iconSize:[W,SZ[mode]], iconAnchor:[W/2,SZ[mode]+7]});
+    var q = dims();
+    return L.divIcon({className:'mkw', html:card(c), iconSize:[q.w,q.h], iconAnchor:[q.w/2,q.h+7]});
   }
   function layout(){
     if (!inited) return;
-    var h = SZ[mode], C, P;
+    var q = dims(), W = q.w, h = q.h, C, P;
     if (map) {
       P = D.communes.map(function(c){var q = map.latLngToLayerPoint([c.lat,c.lon]); return {x:q.x, y:q.y};});
       C = declutter(P, W, h, null);
@@ -1031,7 +1129,7 @@ th.n.clk{cursor:pointer}th.n.clk:hover{color:var(--acc);text-decoration:underlin
       C = declutter(P, W, h, {x0:W/2+4, x1:Wb-W/2-4, y0:h+10, y1:Hb-8});
       var svg = '';
       D.communes.forEach(function(c,i){
-        mk[i].style.left = C[i].x+'px'; mk[i].style.top = C[i].y+'px';
+        mk[i].style.width = W+'px'; mk[i].style.left = C[i].x+'px'; mk[i].style.top = C[i].y+'px';
         svg += '<line x1="'+C[i].x+'" y1="'+(C[i].y+7)+'" x2="'+P[i].x+'" y2="'+P[i].y+'" stroke="#4fc3f7" stroke-opacity=".7"/>'
              + '<circle cx="'+P[i].x+'" cy="'+P[i].y+'" r="3" fill="#4fc3f7"/>';
       });
@@ -1050,6 +1148,7 @@ th.n.clk{cursor:pointer}th.n.clk:hover{color:var(--acc);text-decoration:underlin
   }
   function build(){
     var el = $('#map');
+    curD = wantDens();
     if (window.L) {
       map = L.map(el, {minZoom:8, maxZoom:14, zoomSnap:0.25, zoomDelta:0.5});
       var fonds = {
@@ -1076,9 +1175,10 @@ th.n.clk{cursor:pointer}th.n.clk:hover{color:var(--acc);text-decoration:underlin
         mm.on('click', function(){ openAtmo(i); });
         mk.push(mm);
       });
-      map.fitBounds(L.latLngBounds(D.communes.map(function(c){return [c.lat,c.lon];})), {padding:[90,90]});
+      BOUNDS = L.latLngBounds(D.communes.map(function(c){return [c.lat,c.lon];}));
+      map.fitBounds(BOUNDS, {padding:[70,70]});
       inited = true;
-      map.on('zoomend', layout);
+      map.on('zoomend', function(){ var nd = wantDens(); if (nd !== curD) refresh(); else layout(); });
       layout(); setTimeout(layout, 400);
     } else {                                  // repli sans fond de carte (Leaflet indisponible)
       el.classList.add('fb');
@@ -1099,6 +1199,7 @@ th.n.clk{cursor:pointer}th.n.clk:hover{color:var(--acc);text-decoration:underlin
   }
   function refresh(){
     if (!inited) return;
+    curD = wantDens();
     mk.forEach(function(m,i){
       if (map) m.setIcon(icon(D.communes[i])); else m.innerHTML = card(D.communes[i]);
     });
@@ -1107,11 +1208,13 @@ th.n.clk{cursor:pointer}th.n.clk:hover{color:var(--acc);text-decoration:underlin
   function view(v){
     $('#vue-tableau').hidden = (v !== 'tableau');
     $('#vue-carte').hidden = (v !== 'carte');
-    document.querySelectorAll('.tabs button').forEach(function(b){b.classList.toggle('on', b.dataset.v===v);});
+    document.querySelectorAll('.tabs button[data-v]').forEach(function(b){b.classList.toggle('on', b.dataset.v===v);});
+    ['tsep','mapbar','mapctl'].forEach(function(id){ $('#'+id).hidden = (v !== 'carte'); });
+    if (v !== 'carte') document.body.classList.remove('mapfs');
     if (v === 'carte') { init(); if (map) map.invalidateSize(); }
     try { history.replaceState(null, '', v==='carte' ? '#carte' : location.pathname+location.search); } catch(e) {}
   }
-  document.querySelectorAll('.tabs button').forEach(function(b){b.onclick=function(){view(b.dataset.v);};});
+  document.querySelectorAll('.tabs button[data-v]').forEach(function(b){b.onclick=function(){view(b.dataset.v);};});
   // ---------- Atmogramme horaire (24 h) d'une commune ----------
   var DIRS = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSO','SO','OSO','O','ONO','NO','NNO'];
   function comp(d){ return d == null ? '' : DIRS[Math.floor((((d % 360) + 360) % 360) / 22.5 + 0.5) % 16]; }
@@ -1148,9 +1251,24 @@ th.n.clk{cursor:pointer}th.n.clk:hover{color:var(--acc);text-decoration:underlin
       return '<text x="' + x + '" y="' + f1(y) + '" fill="' + col + '" font-size="' + size + '" text-anchor="' + (anchor || 'start') + '"' + (extra || '') + '>' + s + '</text>';
     }
     var BOLD = ' font-weight="600"';
-    o.push('<svg viewBox="0 0 760 500" width="100%" role="img" aria-label="Atmogramme de ' + esc(c.name) + '" style="display:block">');
+    o.push('<svg viewBox="0 0 760 536" width="100%" role="img" aria-label="Atmogramme de ' + esc(c.name) + '" style="display:block">');
     o.push('<defs><linearGradient id="gT" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4fc3f7" stop-opacity=".5"/>'
          + '<stop offset="1" stop-color="#4fc3f7" stop-opacity="0"/></linearGradient></defs>');
+    // --- Ciel heure par heure (pictogrammes ; versions de nuit si disponibles, sinon jour estompé)
+    var IS = D.isrc || {};
+    o.push(tx(x0 - 7, 22, 'Ciel', '#9db8e6', 10.5, 'end'));
+    for (var q = 0; q < 24; q++) {
+      var code = H.pi ? H.pi[q] : null, inf = code != null ? IS[code] : null;
+      if (!inf) continue;
+      var nuit = H.nu && H.nu[q], src = (nuit && inf.n) ? inf.n : inf.d, lab = esc(inf.l + (nuit ? ' (nuit)' : ''));
+      if (src) o.push('<image href="' + src + '" x="' + f1(x0 + q * sw + 0.8) + '" y="3" width="' + f1(sw - 1.6) + '" height="27" preserveAspectRatio="xMidYMid meet"'
+                      + (nuit && !inf.n ? ' opacity=".45"' : '') + '><title>' + lab + '</title></image>');
+      else o.push(tx(X(q), 25, inf.e, '#fff', 19, 'middle', nuit ? ' opacity=".5"' : ''));
+    }
+    o.push('<g transform="translate(0,36)">');
+    if (H.nu) H.nu.forEach(function(n, q){     // heures de nuit : fond assombri
+      if (n) o.push('<rect x="' + f1(x0 + q * sw) + '" y="46" width="' + f1(sw) + '" height="400" fill="#020a1e" fill-opacity=".34"/>');
+    });
     for (var h = 0; h < 24; h += 3) {          // grille verticale + heures
       o.push('<line x1="' + X(h) + '" y1="48" x2="' + X(h) + '" y2="446" stroke="#fff" stroke-opacity=".07"/>');
       o.push(tx(X(h), 488, h + ' h', '#9db8e6', 11, 'middle'));
@@ -1239,12 +1357,13 @@ th.n.clk{cursor:pointer}th.n.clk:hover{color:var(--acc);text-decoration:underlin
         + ' · nuages haut/moyen/bas ' + cl(H.ch[k]) + '/' + cl(H.cm[k]) + '/' + cl(H.cl[k]) + ' %';
       o.push('<rect x="' + f1(x0 + k * sw) + '" y="44" width="' + f1(sw) + '" height="402" style="fill:transparent;pointer-events:all"><title>' + esc(title) + '</title></rect>');
     }
-    o.push('</svg>');
+    o.push('</g></svg>');
     return o.join('');
   }
   function openAtmo(i){
     var c = D.communes[i]; if (!c) return;
-    $('#atmo-t').innerHTML = esc(c.name) + ' <span>· atmogramme du ' + esc((D.jour || '').toLowerCase()) + ' (heure locale)</span>';
+    var sun = c.hr && c.hr.sun ? ' · soleil : lever ' + c.hr.sun[0].replace(':', ' h ') + ', coucher ' + c.hr.sun[1].replace(':', ' h ') : '';
+    $('#atmo-t').innerHTML = esc(c.name) + ' <span>· atmogramme du ' + esc((D.jour || '').toLowerCase()) + ' (heure locale)' + esc(sun) + '</span>';
     $('#atmo-svg').innerHTML = c.hr ? atmoSVG(c) : '<p style="color:#9db8e6">Données horaires indisponibles.</p>';
     $('#atmo').hidden = false;
     $('.atmo-x').focus();
@@ -1252,14 +1371,17 @@ th.n.clk{cursor:pointer}th.n.clk:hover{color:var(--acc);text-decoration:underlin
   function closeAtmo(){ $('#atmo').hidden = true; }
   $('.atmo-x').onclick = closeAtmo;
   $('#atmo').onclick = function(e){ if (e.target === this) closeAtmo(); };
-  document.addEventListener('keydown', function(e){ if (e.key === 'Escape') closeAtmo(); });
+  document.addEventListener('keydown', function(e){
+    if (e.key !== 'Escape') return;
+    if (!$('#atmo').hidden) closeAtmo(); else if (document.body.classList.contains('mapfs')) toggleFs();
+  });
   document.querySelectorAll('#vue-tableau th.clk').forEach(function(th){
     var i = D.communes.findIndex(function(c){ return c.name === th.dataset.n; });
     th.onclick = function(){ if (i >= 0) openAtmo(i); };
     th.onkeydown = function(e){ if ((e.key === 'Enter' || e.key === ' ') && i >= 0) { e.preventDefault(); openAtmo(i); } };
   });
   function showBul(on){                          // page « Bulletin » : remplace la carte
-    $('#mapwrap').hidden = on; $('#bulpage').hidden = !on;
+    $('#mapwrap').hidden = on; $('#bulpage').hidden = !on; $('#mapctl').hidden = on;
     if (!on && map) { map.invalidateSize(); layout(); }
     try { history.replaceState(null, '', on ? '#bulletin' : '#carte'); } catch(e) {}
   }
@@ -1271,7 +1393,19 @@ th.n.clk{cursor:pointer}th.n.clk:hover{color:var(--acc);text-decoration:underlin
       showBul(false); mode = m; refresh();
     };
   });
-  window.addEventListener('resize', function(){ if (inited && !map) layout(); });
+  function toggleFs(){
+    var on = document.body.classList.toggle('mapfs');
+    $('#b-fs').textContent = on ? 'Quitter le plein écran' : 'Plein écran';
+    setTimeout(function(){ if (map) map.invalidateSize(); layout(); }, 80);
+  }
+  $('#b-fs').onclick = toggleFs;
+  $('#b-fit').onclick = function(){ if (map && BOUNDS) map.fitBounds(BOUNDS, {padding:[70,70]}); layout(); };
+  $('#b-dens').onclick = function(){
+    pref = pref === 'auto' ? 'compact' : pref === 'compact' ? 'full' : 'auto';
+    this.textContent = 'Cadres : ' + (pref === 'auto' ? 'auto' : pref === 'compact' ? 'compacts' : 'détaillés');
+    refresh();
+  };
+  window.addEventListener('resize', function(){ if (inited) { if (map) map.invalidateSize(); layout(); } });
   var h0 = location.hash;
   view(h0 === '#carte' || h0 === '#bulletin' ? 'carte' : 'tableau');
   if (h0 === '#bulletin') { var bb = $('.mapbar button[data-m="4"]'); if (bb) bb.click(); }
@@ -1294,9 +1428,11 @@ def map_payload(rows, d):
             "gd": compass(r["gmax_dir"]) if r["gmax_dir"] is not None else "",
             "gdd": round(r["gmax_dir"]) if r["gmax_dir"] is not None else None,
             "hr": r.get("hourly")})
-    codes = sorted({e["p"] for c in com for e in c["ech"]})
+    codes = sorted({e["p"] for c in com for e in c["ech"]} | {k for c in com for k in ((c.get("hr") or {}).get("pi") or [])})
     data = {"jour": f"{JOURS[d.weekday()].capitalize()} {d.day} {MOIS[d.month-1]}", "communes": com,
-            "icons": {str(k): icon_html(k) for k in codes}}
+            "icons": {str(k): icon_html(k) for k in codes},
+            "isrc": {str(k): {"d": icon_src(k, "day"), "n": icon_src(k, "night"), "l": PICTO_FR.get(k, ""), "e": emoji_pour(k)}
+                     for k in codes}}
     return json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
 
 # ------------------------------------------------------------ RENDU -------
@@ -1304,16 +1440,23 @@ JOURS = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"
 MOIS = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août",
         "septembre", "octobre", "novembre", "décembre"]
 
+def icon_src(code, moment="day"):
+    """Chemin relatif de l'icône NN_day*.png ou NN_night*.png si elle existe dans le dossier icons, sinon None."""
+    f = next(iter(sorted(ICON_DIR.glob(f"{code:02d}_{moment}*.png"))), None) if ICON_DIR.exists() else None
+    return f"{ICON_DIR.name}/{f.name}" if f else None
+
+def emoji_pour(code):
+    return ("🌫️" if code in FOG else "⛈️" if code in THUNDER else "🌨️" if code in SNOW
+            else "🌧️" if code in WET and code != 31 else "🌦️" if code == 31
+            else "☀️" if SKY_OF.get(code, 2) == 0 else "⛅" if SKY_OF.get(code, 2) == 2
+            else "🌥️" if SKY_OF.get(code) == 3 else "☁️" if code == 22 else "🌤️")
+
 def icon_html(code):
     lab = PICTO_FR.get(code, "")
-    f = next(iter(sorted(ICON_DIR.glob(f"{code:02d}_day*.png"))), None) if ICON_DIR.exists() else None
-    if f:
-        return f'<img src="{ICON_DIR.name}/{f.name}" alt="{lab}" title="{lab}" class="pic">'
-    emo = ("🌫️" if code in FOG else "⛈️" if code in THUNDER else "🌨️" if code in SNOW
-           else "🌧️" if code in WET and code != 31 else "🌦️" if code == 31
-           else "☀️" if SKY_OF.get(code, 2) == 0 else "⛅" if SKY_OF.get(code, 2) == 2
-           else "🌥️" if SKY_OF.get(code) == 3 else "☁️" if code == 22 else "🌤️")
-    return f'<span class="emo" title="{lab}">{emo}</span>'
+    src = icon_src(code, "day")
+    if src:
+        return f'<img src="{src}" alt="{lab}" title="{lab}" class="pic">'
+    return f'<span class="emo" title="{lab}">{emoji_pour(code)}</span>'
 
 def wind_color(g):
     """Couleur de la rafale (identique à celle des flèches de la carte)."""
@@ -1348,7 +1491,7 @@ def render(rows, d, generated):
         mark = ' <sup title="Un seul modèle disponible">*</sup>' if partial else ""
         rr = classe_pluie(r["rr"])
         body.append(
-            f'<tr><th class="n clk" data-n="{name}" tabindex="0" role="button" title="Cliquer pour l’atmogramme">{name}{mark}</th>{cells}'
+            f'<tr><th class="n clk" data-n="{hesc(name)}" tabindex="0" role="button" title="Cliquer pour l’atmogramme">{hesc(name)}{mark}</th>{cells}'
             f'<td class="x tn">{temp_cell(r["tn"])}</td><td class="x tx">{temp_cell(r["tx"])}</td>'
             f'<td class="x rr">{rr} <small>mm</small></td>'
             f'<td class="x g">{wind_cell(r["gmax"], r["gmax_dir"])}</td></tr>')
@@ -1364,8 +1507,8 @@ def render(rows, d, generated):
 *{{box-sizing:border-box}}
 body{{margin:0;background:radial-gradient(circle at 20% 0,#14305e,#081530 70%);color:var(--txt);
 font-family:"Segoe UI",Roboto,Helvetica,Arial,sans-serif;padding:14px 18px}}
-header{{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:10px}}
-.logo{{height:116px;width:auto;border-radius:8px;display:block;box-shadow:0 2px 12px rgba(0,0,0,.5);border:1px solid var(--line)}}
+header{{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:8px}}
+.logo{{height:70px;width:auto;border-radius:8px;display:block;box-shadow:0 2px 12px rgba(0,0,0,.5);border:1px solid var(--line)}}
 @media (max-width:700px){{.logo{{height:70px}}}}
 h1{{font-size:20px;margin:0;letter-spacing:.5px}} h1 span{{color:var(--acc)}}
 .sub{{color:var(--mut);font-size:13px;margin-top:3px}}
