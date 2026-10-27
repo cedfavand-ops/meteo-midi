@@ -1,5 +1,5 @@
 {
-  "_aide": "Latitude, longitude (degrés décimaux) de chaque commune. Ce fichier prime sur le code : modifiez seulement les valeurs.",
+  "_aide": "Liste COMPLÈTE des communes affichées, dans l'ordre du tableau. Une ligne = une commune : \"Nom\": [latitude, longitude] (degrés décimaux). Ajoutez une ligne pour ajouter une commune, supprimez-la pour la retirer. Facultatif : [latitude, longitude, \"zone\"] pour rattacher la commune à une zone du bulletin ; sans zone, la plus proche est choisie.",
   "Montjoyer": [44.4772, 4.8528],
   "Donzère": [44.4425, 4.7058],
   "Pierrelatte": [44.3775, 4.6985],
