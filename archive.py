@@ -13,7 +13,7 @@ Météo-Midi : archivage quotidien (étape 1 du mode correctif).
 La clé d'API est lue dans la variable d'environnement INFOCLIMAT_TOKEN (secret GitHub).
 Données Infoclimat : licence CC BY-NC (usage non commercial, mention de la source).
 """
-import argparse, json, os, sys, time, urllib.parse, urllib.request
+import argparse, json, os, sys, time, urllib.error, urllib.parse, urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -57,28 +57,45 @@ def fnum(x):
 
 
 # ---------------------------------------------------------- API Infoclimat --
-def ic_get(ids, start, end, token, retries=3, timeout=60):
-    """Appelle l'API OpenData v2. Ne journalise jamais la clé."""
-    params = [("version", "2"), ("method", "get"), ("format", "json")]
-    params += [("stations[]", i) for i in ids]
-    params += [("start", start.isoformat()), ("end", end.isoformat()), ("token", token)]
-    req = urllib.request.Request(API + "?" + urllib.parse.urlencode(params),
-                                 headers={"User-Agent": "Meteo-Midi/1.0 (usage non commercial)"})
-    for essai in range(1, retries + 1):
-        try:
-            with urllib.request.urlopen(req, timeout=timeout) as r:
-                data = json.load(r)
-            if data.get("status") != "OK":
-                raise RuntimeError(f"statut={data.get('status')} erreurs={data.get('errors')}")
-            if data.get("errors"):
-                print(f"  Infoclimat {ids} : avertissements {data['errors']}", file=sys.stderr)
-            return data
-        except Exception as e:
-            msg = str(e).replace(token, "***")
-            print(f"  Infoclimat {ids} : tentative {essai}/{retries} échouée ({type(e).__name__} {msg})", file=sys.stderr)
-            if essai == retries:
-                return None
-            time.sleep(5 * essai)
+STATUT = {"infos": [], "erreurs": []}
+
+def note(msg, erreur=True):
+    """Affiche dans le journal et garde une trace pour data/statut.json."""
+    print(("  " if erreur else "") + msg, file=sys.stderr if erreur else sys.stdout)
+    STATUT["erreurs" if erreur else "infos"].append(msg)
+
+def ic_get(ids, start, end, token, timeout=60):
+    """Appelle l'API OpenData v2. Deux écritures de l'adresse sont tentées (crochets de stations[] en clair,
+    puis encodés). En cas de refus, le message exact du serveur est journalisé ; la clé n'apparaît jamais."""
+    masque = lambda txt: txt.replace(token, "***") if token else txt
+    base = [("version", "2"), ("method", "get"), ("format", "json")]
+    base += [("stations[]", i) for i in ids]
+    base += [("start", start.isoformat()), ("end", end.isoformat()), ("token", token)]
+    variantes = [("crochets en clair", urllib.parse.urlencode(base, safe="[]")),
+                 ("crochets encodés", urllib.parse.urlencode(base))]
+    for nom, qs in variantes:
+        req = urllib.request.Request(API + "?" + qs, headers={"User-Agent": "Meteo-Midi/1.0 (usage non commercial)"})
+        for essai in range(1, 4):
+            try:
+                with urllib.request.urlopen(req, timeout=timeout) as r:
+                    data = json.load(r)
+                if data.get("status") != "OK":
+                    note(masque(f"Infoclimat {ids} [{nom}] : statut={data.get('status')} erreurs={data.get('errors')}"))
+                    break                                   # réponse d'erreur de l'API : inutile de répéter
+                if data.get("errors"):
+                    note(masque(f"Infoclimat {ids} : avertissements {data['errors']}"))
+                return data
+            except urllib.error.HTTPError as e:
+                corps = e.read()[:300].decode("utf-8", "replace")
+                note(masque(f"Infoclimat {ids} [{nom}] : HTTP {e.code} {e.reason} ; réponse du serveur : {corps!r}"))
+                if e.code < 500:
+                    break                                   # erreur de requête : on passe à l'autre écriture
+                time.sleep(5 * essai)
+            except Exception as e:
+                note(masque(f"Infoclimat {ids} [{nom}] : tentative {essai}/3 échouée ({type(e).__name__} {e})"))
+                if essai < 3:
+                    time.sleep(5 * essai)
+    return None
 
 def ensure_meta(ids, token, meta):
     """Coordonnées/altitude/licence des stations (lues dans l'API, mises en cache)."""
@@ -86,7 +103,7 @@ def ensure_meta(ids, token, meta):
     for i in ids:
         if i in meta:
             continue
-        data = ic_get([i], today, today, token)
+        data = ic_get([i], today - timedelta(days=1), today, token)
         if not data:
             continue
         for s in data.get("stations", []):
@@ -124,7 +141,8 @@ def run_forecast(d, token):
     meta = jload(DATA / "stations.json", {})
     if token:
         meta = ensure_meta(REF_IDS, token, meta)
-        jdump(DATA / "stations.json", meta)
+        if meta:                                             # jamais de fichier vide
+            jdump(DATA / "stations.json", meta)
     pts = [(f"ST:{i}", meta[i]["latitude"], meta[i]["longitude"]) for i in REF_IDS
            if i in meta and meta[i].get("latitude") is not None]
     locs = list(STATIONS) + pts
@@ -210,8 +228,12 @@ def run_obs(today, token, lookback=3):
                 continue
             obs[i] = obs_metrics(parse_rows(data.get("hourly", {}).get(i, [])), d)
             time.sleep(1)
-        jdump(ofile, obs)
-        compare(d)
+        if obs:                                              # jamais de fichier vide
+            jdump(ofile, obs)
+            note(f"Observations {d} : {len(obs)}/{len(REF_IDS)} stations enregistrées.", erreur=False)
+            compare(d)
+        else:
+            note(f"Observations {d} : aucune station récupérée.")
 
 def compare(d):
     f, o = jload(DATA / "forecasts" / f"{d}.json", {}), jload(DATA / "obs" / f"{d}.json", {})
@@ -229,18 +251,31 @@ def compare(d):
 
 
 # ------------------------------------------------------------------ main ----
+def ecrire_statut(d, token):
+    obs_dir = DATA / "obs"
+    jdump(DATA / "statut.json", {
+        "genere_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%MZ"), "jour_prevu": d.isoformat(),
+        "cle_infoclimat_presente": bool(token), "stations_connues": len(jload(DATA / "stations.json", {})),
+        "fichiers_observations": sorted(f.name for f in obs_dir.glob("*.json")) if obs_dir.exists() else [],
+        "infos": STATUT["infos"][-20:], "erreurs": STATUT["erreurs"][-30:]})
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--date", help="jour prévu AAAA-MM-JJ (défaut : demain)")
     a = ap.parse_args()
-    token = os.environ.get("INFOCLIMAT_TOKEN", "").strip()
+    brut = os.environ.get("INFOCLIMAT_TOKEN", "")
+    token = brut.strip().strip("\"'").strip()               # tolère espaces, retour à la ligne, guillemets collés
     today = datetime.now(PARIS).date()
     d = datetime.strptime(a.date, "%Y-%m-%d").date() if a.date else today + timedelta(days=1)
+    if token:
+        note(f"Clé Infoclimat reçue : {len(token)} caractères"
+             + (f" ({len(brut) - len(token)} caractère(s) superflu(s) retiré(s))" if len(brut) != len(token) else ""), erreur=False)
     run_forecast(d, token)
     if token:
         run_obs(today, token)
     else:
-        print("INFOCLIMAT_TOKEN absent : observations ignorées.")
+        note("INFOCLIMAT_TOKEN absent : observations ignorées.")
+    ecrire_statut(d, token)
 
 if __name__ == "__main__":
     main()
