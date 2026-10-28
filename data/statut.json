@@ -1,0 +1,42 @@
+{
+ "cle_infoclimat_presente": true,
+ "erreurs": [
+  "Infoclimat ['STATIC0451'] [crochets en clair] : HTTP 400 Bad Request ; réponse du serveur : '{\"errors\":[\"Wrong IP address\"]}'",
+  "Infoclimat ['STATIC0451'] [crochets encodés] : HTTP 400 Bad Request ; réponse du serveur : '{\"errors\":[\"Wrong IP address\"]}'",
+  "Observations 2026-10-26 : aucune station récupérée.",
+  "Infoclimat ['000FU'] [crochets en clair] : HTTP 400 Bad Request ; réponse du serveur : '{\"errors\":[\"Wrong IP address\"]}'",
+  "Infoclimat ['000FU'] [crochets encodés] : HTTP 400 Bad Request ; réponse du serveur : '{\"errors\":[\"Wrong IP address\"]}'",
+  "Infoclimat ['000OW'] [crochets en clair] : HTTP 400 Bad Request ; réponse du serveur : '{\"errors\":[\"Wrong IP address\"]}'",
+  "Infoclimat ['000OW'] [crochets encodés] : HTTP 400 Bad Request ; réponse du serveur : '{\"errors\":[\"Wrong IP address\"]}'",
+  "Infoclimat ['000ZB'] [crochets en clair] : HTTP 400 Bad Request ; réponse du serveur : '{\"errors\":[\"Wrong IP address\"]}'",
+  "Infoclimat ['000ZB'] [crochets encodés] : HTTP 400 Bad Request ; réponse du serveur : '{\"errors\":[\"Wrong IP address\"]}'",
+  "Infoclimat ['000ZW'] [crochets en clair] : HTTP 400 Bad Request ; réponse du serveur : '{\"errors\":[\"Wrong IP address\"]}'",
+  "Infoclimat ['000ZW'] [crochets encodés] : HTTP 400 Bad Request ; réponse du serveur : '{\"errors\":[\"Wrong IP address\"]}'",
+  "Infoclimat ['07563'] [crochets en clair] : HTTP 400 Bad Request ; réponse du serveur : '{\"errors\":[\"Wrong IP address\"]}'",
+  "Infoclimat ['07563'] [crochets encodés] : HTTP 400 Bad Request ; réponse du serveur : '{\"errors\":[\"Wrong IP address\"]}'",
+  "Infoclimat ['07579'] [crochets en clair] : HTTP 400 Bad Request ; réponse du serveur : '{\"errors\":[\"Wrong IP address\"]}'",
+  "Infoclimat ['07579'] [crochets encodés] : HTTP 400 Bad Request ; réponse du serveur : '{\"errors\":[\"Wrong IP address\"]}'",
+  "Infoclimat ['07645'] [crochets en clair] : HTTP 400 Bad Request ; réponse du serveur : '{\"errors\":[\"Wrong IP address\"]}'",
+  "Infoclimat ['07645'] [crochets encodés] : HTTP 400 Bad Request ; réponse du serveur : '{\"errors\":[\"Wrong IP address\"]}'",
+  "Infoclimat ['MF07033001'] [crochets en clair] : HTTP 400 Bad Request ; réponse du serveur : '{\"errors\":[\"Wrong IP address\"]}'",
+  "Infoclimat ['MF07033001'] [crochets encodés] : HTTP 400 Bad Request ; réponse du serveur : '{\"errors\":[\"Wrong IP address\"]}'",
+  "Infoclimat ['MF26116002'] [crochets en clair] : HTTP 400 Bad Request ; réponse du serveur : '{\"errors\":[\"Wrong IP address\"]}'",
+  "Infoclimat ['MF26116002'] [crochets encodés] : HTTP 400 Bad Request ; réponse du serveur : '{\"errors\":[\"Wrong IP address\"]}'",
+  "Infoclimat ['MF30101001'] [crochets en clair] : HTTP 400 Bad Request ; réponse du serveur : '{\"errors\":[\"Wrong IP address\"]}'",
+  "Infoclimat ['MF30101001'] [crochets encodés] : HTTP 400 Bad Request ; réponse du serveur : '{\"errors\":[\"Wrong IP address\"]}'",
+  "Infoclimat ['MF30202002'] [crochets en clair] : HTTP 400 Bad Request ; réponse du serveur : '{\"errors\":[\"Wrong IP address\"]}'",
+  "Infoclimat ['MF30202002'] [crochets encodés] : HTTP 400 Bad Request ; réponse du serveur : '{\"errors\":[\"Wrong IP address\"]}'",
+  "Infoclimat ['STATIC0098'] [crochets en clair] : HTTP 400 Bad Request ; réponse du serveur : '{\"errors\":[\"Wrong IP address\"]}'",
+  "Infoclimat ['STATIC0098'] [crochets encodés] : HTTP 400 Bad Request ; réponse du serveur : '{\"errors\":[\"Wrong IP address\"]}'",
+  "Infoclimat ['STATIC0451'] [crochets en clair] : HTTP 400 Bad Request ; réponse du serveur : '{\"errors\":[\"Wrong IP address\"]}'",
+  "Infoclimat ['STATIC0451'] [crochets encodés] : HTTP 400 Bad Request ; réponse du serveur : '{\"errors\":[\"Wrong IP address\"]}'",
+  "Observations 2026-10-25 : aucune station récupérée."
+ ],
+ "fichiers_observations": [],
+ "genere_utc": "2026-10-28T08:11Z",
+ "infos": [
+  "Clé Infoclimat reçue : 54 caractères"
+ ],
+ "jour_prevu": "2026-10-29",
+ "stations_connues": 0
+}
