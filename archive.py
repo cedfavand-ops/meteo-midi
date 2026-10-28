@@ -58,6 +58,8 @@ def fnum(x):
 
 # ---------------------------------------------------------- API Infoclimat --
 STATUT = {"infos": [], "erreurs": []}
+IC_BLOQUE = {"raison": None}      # renseigné dès que les appels sont inutiles : on arrête d'insister
+IC_ECHECS = {"n": 0}
 
 def note(msg, erreur=True):
     """Affiche dans le journal et garde une trace pour data/statut.json."""
@@ -67,6 +69,8 @@ def note(msg, erreur=True):
 def ic_get(ids, start, end, token, timeout=60):
     """Appelle l'API OpenData v2. Deux écritures de l'adresse sont tentées (crochets de stations[] en clair,
     puis encodés). En cas de refus, le message exact du serveur est journalisé ; la clé n'apparaît jamais."""
+    if IC_BLOQUE["raison"]:
+        return None
     masque = lambda txt: txt.replace(token, "***") if token else txt
     base = [("version", "2"), ("method", "get"), ("format", "json")]
     base += [("stations[]", i) for i in ids]
@@ -84,10 +88,17 @@ def ic_get(ids, start, end, token, timeout=60):
                     break                                   # réponse d'erreur de l'API : inutile de répéter
                 if data.get("errors"):
                     note(masque(f"Infoclimat {ids} : avertissements {data['errors']}"))
+                IC_ECHECS["n"] = 0
                 return data
             except urllib.error.HTTPError as e:
                 corps = e.read()[:300].decode("utf-8", "replace")
                 note(masque(f"Infoclimat {ids} [{nom}] : HTTP {e.code} {e.reason} ; réponse du serveur : {corps!r}"))
+                if "wrong ip" in corps.lower():
+                    IC_BLOQUE["raison"] = "adresse IP non autorisée pour cette clé (« Wrong IP address »)"
+                    note("Clé Infoclimat refusée : « Wrong IP address ». Cette clé n'est acceptée que depuis une adresse IP précise, "
+                         "or les serveurs GitHub changent d'adresse à chaque exécution. Les appels suivants sont suspendus "
+                         "pour ne pas surcharger Infoclimat.")
+                    return None
                 if e.code < 500:
                     break                                   # erreur de requête : on passe à l'autre écriture
                 time.sleep(5 * essai)
@@ -95,6 +106,10 @@ def ic_get(ids, start, end, token, timeout=60):
                 note(masque(f"Infoclimat {ids} [{nom}] : tentative {essai}/3 échouée ({type(e).__name__} {e})"))
                 if essai < 3:
                     time.sleep(5 * essai)
+    IC_ECHECS["n"] += 1
+    if IC_ECHECS["n"] >= 4:
+        IC_BLOQUE["raison"] = "4 échecs consécutifs"
+        note("Infoclimat : 4 échecs consécutifs, les appels suivants sont suspendus.")
     return None
 
 def ensure_meta(ids, token, meta):
@@ -213,10 +228,16 @@ def obs_metrics(rows, d):
     m["n"] = len(win)
     return m
 
-def run_obs(today, token, lookback=3):
+def run_obs(today, token, lookback=3, exiger_prevision=True):
+    """Télécharge les observations des `lookback` derniers jours. En mode normal, seuls les jours dont la prévision
+    est archivée sont traités ; en mode autonome (exiger_prevision=False), tous les jours le sont."""
     for k in range(1, lookback + 1):
+        if IC_BLOQUE["raison"]:
+            note(f"Observations ignorées : {IC_BLOQUE['raison']}.")
+            return
         d = today - timedelta(days=k)
-        if not (DATA / "forecasts" / f"{d}.json").exists():
+        ffile = DATA / "forecasts" / f"{d}.json"
+        if exiger_prevision and not ffile.exists():
             continue
         ofile = DATA / "obs" / f"{d}.json"
         obs = jload(ofile, {})
@@ -225,14 +246,17 @@ def run_obs(today, token, lookback=3):
         for i in todo:
             data = ic_get([i], d - timedelta(days=1), d + timedelta(days=1), token)
             if data is None:
+                if IC_BLOQUE["raison"]:
+                    break
                 continue
             obs[i] = obs_metrics(parse_rows(data.get("hourly", {}).get(i, [])), d)
             time.sleep(1)
         if obs:                                              # jamais de fichier vide
             jdump(ofile, obs)
             note(f"Observations {d} : {len(obs)}/{len(REF_IDS)} stations enregistrées.", erreur=False)
-            compare(d)
-        else:
+            if ffile.exists():
+                compare(d)
+        elif not IC_BLOQUE["raison"]:
             note(f"Observations {d} : aucune station récupérée.")
 
 def compare(d):
@@ -257,11 +281,15 @@ def ecrire_statut(d, token):
         "genere_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%MZ"), "jour_prevu": d.isoformat(),
         "cle_infoclimat_presente": bool(token), "stations_connues": len(jload(DATA / "stations.json", {})),
         "fichiers_observations": sorted(f.name for f in obs_dir.glob("*.json")) if obs_dir.exists() else [],
+        "infoclimat_bloque": IC_BLOQUE["raison"],
         "infos": STATUT["infos"][-20:], "erreurs": STATUT["erreurs"][-30:]})
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--date", help="jour prévu AAAA-MM-JJ (défaut : demain)")
+    ap.add_argument("--obs-seulement", action="store_true",
+                    help="ne télécharge que les observations Infoclimat (à lancer depuis l'ordinateur dont l'adresse IP est autorisée)")
+    ap.add_argument("--jours", type=int, default=7, help="avec --obs-seulement : nombre de jours passés à récupérer (défaut 7)")
     a = ap.parse_args()
     brut = os.environ.get("INFOCLIMAT_TOKEN", "")
     token = brut.strip().strip("\"'").strip()               # tolère espaces, retour à la ligne, guillemets collés
@@ -270,6 +298,11 @@ def main():
     if token:
         note(f"Clé Infoclimat reçue : {len(token)} caractères"
              + (f" ({len(brut) - len(token)} caractère(s) superflu(s) retiré(s))" if len(brut) != len(token) else ""), erreur=False)
+    if a.obs_seulement:
+        if not token:
+            sys.exit("INFOCLIMAT_TOKEN absent : définissez la variable d'environnement avec votre clé avant de lancer.")
+        run_obs(today, token, lookback=max(1, a.jours), exiger_prevision=False)
+        return
     run_forecast(d, token)
     if token:
         run_obs(today, token)
