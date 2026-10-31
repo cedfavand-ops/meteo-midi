@@ -6,11 +6,11 @@
   "Observations ignorées : adresse IP non autorisée pour cette clé (« Wrong IP address »)."
  ],
  "fichiers_observations": [],
- "genere_utc": "2026-10-30T21:10Z",
+ "genere_utc": "2026-10-31T12:54Z",
  "infoclimat_bloque": "adresse IP non autorisée pour cette clé (« Wrong IP address »)",
  "infos": [
   "Clé Infoclimat reçue : 54 caractères"
  ],
- "jour_prevu": "2026-10-31",
+ "jour_prevu": "2026-11-01",
  "stations_connues": 0
 }
