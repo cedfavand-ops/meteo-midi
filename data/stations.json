@@ -1,0 +1,50 @@
+{
+ "000FU": {
+  "elevation": 107,
+  "latitude": 44.349,
+  "license": "NON-COMMERCIAL ONLY: CC BY NC",
+  "longitude": 4.766,
+  "name": "Saint-Paul-Trois-Châteaux",
+  "type": "static"
+ },
+ "000OW": {
+  "elevation": 112,
+  "latitude": 44.029,
+  "license": "CC BY",
+  "longitude": 4.38,
+  "name": "Montaren-et-Saint-Médiers",
+  "type": "static"
+ },
+ "000ZB": {
+  "elevation": 80,
+  "latitude": 44.084,
+  "license": "NON-COMMERCIAL ONLY: CC BY NC",
+  "longitude": 4.615,
+  "name": "Saint-Paul-les-Fonts",
+  "type": "static"
+ },
+ "000ZW": {
+  "elevation": 255,
+  "latitude": 44.189,
+  "license": "NON-COMMERCIAL ONLY: CC BY NC",
+  "longitude": 4.36,
+  "name": "Lussan - La Lèque",
+  "type": "static"
+ },
+ "STATIC0098": {
+  "elevation": 310,
+  "latitude": 44.476,
+  "license": "NON-COMMERCIAL ONLY: CC BY NC",
+  "longitude": 4.851,
+  "name": "Montjoyer",
+  "type": "static"
+ },
+ "STATIC0451": {
+  "elevation": 280,
+  "latitude": 44.081,
+  "license": "CC BY",
+  "longitude": 4.552,
+  "name": "Saint-Pons-la-Calm - La Gardie",
+  "type": "static"
+ }
+}
