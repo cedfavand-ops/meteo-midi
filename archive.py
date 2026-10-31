@@ -58,6 +58,7 @@ def fnum(x):
 
 # ---------------------------------------------------------- API Infoclimat --
 STATUT = {"infos": [], "erreurs": []}
+REFUSEES = set()                 # stations que l'API refuse pour cette clé (données non autorisées)
 IC_BLOQUE = {"raison": None}      # renseigné dès que les appels sont inutiles : on arrête d'insister
 IC_ECHECS = {"n": 0}
 
@@ -70,6 +71,8 @@ def ic_get(ids, start, end, token, timeout=60):
     """Appelle l'API OpenData v2. Deux écritures de l'adresse sont tentées (crochets de stations[] en clair,
     puis encodés). En cas de refus, le message exact du serveur est journalisé ; la clé n'apparaît jamais."""
     if IC_BLOQUE["raison"]:
+        return None
+    if ids and all(i in REFUSEES for i in ids):          # déjà refusée : inutile de redemander
         return None
     masque = lambda txt: txt.replace(token, "***") if token else txt
     base = [("version", "2"), ("method", "get"), ("format", "json")]
@@ -84,6 +87,11 @@ def ic_get(ids, start, end, token, timeout=60):
                 with urllib.request.urlopen(req, timeout=timeout) as r:
                     data = json.load(r)
                 if data.get("status") != "OK":
+                    errs = " ".join(str(x) for x in (data.get("errors") or []))
+                    if "not allowed" in errs.lower() or "no valid stations" in errs.lower():
+                        REFUSEES.update(ids)                # refus propre à ces stations : on continue avec les autres
+                        note(masque(f"Infoclimat {ids} : station non autorisée pour cette clé ({errs.strip()})"))
+                        return None
                     note(masque(f"Infoclimat {ids} [{nom}] : statut={data.get('status')} erreurs={data.get('errors')}"))
                     break                                   # réponse d'erreur de l'API : inutile de répéter
                 if data.get("errors"):
@@ -281,7 +289,7 @@ def ecrire_statut(d, token):
         "genere_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%MZ"), "jour_prevu": d.isoformat(),
         "cle_infoclimat_presente": bool(token), "stations_connues": len(jload(DATA / "stations.json", {})),
         "fichiers_observations": sorted(f.name for f in obs_dir.glob("*.json")) if obs_dir.exists() else [],
-        "infoclimat_bloque": IC_BLOQUE["raison"],
+        "infoclimat_bloque": IC_BLOQUE["raison"], "stations_refusees": sorted(REFUSEES),
         "infos": STATUT["infos"][-20:], "erreurs": STATUT["erreurs"][-30:]})
 
 def main():
@@ -301,7 +309,22 @@ def main():
     if a.obs_seulement:
         if not token:
             sys.exit("INFOCLIMAT_TOKEN absent : définissez la variable d'environnement avec votre clé avant de lancer.")
+        # coordonnées des stations (une seule fois : ensuite elles sont lues dans data/stations.json)
+        meta = ensure_meta(REF_IDS, token, jload(DATA / "stations.json", {}))
+        if meta:
+            jdump(DATA / "stations.json", meta)
         run_obs(today, token, lookback=max(1, a.jours), exiger_prevision=False)
+        obs_dir = DATA / "obs"
+        n_obs = len(list(obs_dir.glob("*.json"))) if obs_dir.exists() else 0
+        print("")
+        if IC_BLOQUE["raison"]:
+            print(f"ECHEC : {IC_BLOQUE['raison']}. Rien à envoyer sur GitHub.")
+        elif n_obs:
+            print(f"Terminé. À envoyer sur GitHub : data/stations.json ({len(meta)} stations) et le dossier data/obs ({n_obs} fichiers).")
+            if REFUSEES:
+                print(f"Stations refusées par Infoclimat pour cette clé ({len(REFUSEES)}) : {', '.join(sorted(REFUSEES))}.")
+        else:
+            print("Aucune observation récupérée : voir les messages ci-dessus.")
         return
     run_forecast(d, token)
     if token:
