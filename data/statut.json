@@ -1,16 +1,9 @@
 {
  "cle_infoclimat_presente": true,
  "erreurs": [
-  "Infoclimat ['07563'] [crochets en clair] : HTTP 403 Forbidden ; réponse du serveur : '<!DOCTYPE html>\\n<html>\\n<head>\\n<title>Maintenance en cours</title>\\n<style>\\n    body {\\n        width: 35em;\\n        margin: 0 auto;\\n        font-family: Tahoma, Verdana, Arial, sans-serif;\\n    }\\n</style>\\n</head>\\n<body>\\n<h1>Page indisponible</h1>\\n<p>Une maintenance est en cours sur notre infrastructure'",
-  "Infoclimat ['07563'] [crochets encodés] : HTTP 403 Forbidden ; réponse du serveur : '<!DOCTYPE html>\\n<html>\\n<head>\\n<title>Maintenance en cours</title>\\n<style>\\n    body {\\n        width: 35em;\\n        margin: 0 auto;\\n        font-family: Tahoma, Verdana, Arial, sans-serif;\\n    }\\n</style>\\n</head>\\n<body>\\n<h1>Page indisponible</h1>\\n<p>Une maintenance est en cours sur notre infrastructure'",
-  "Infoclimat ['07579'] [crochets en clair] : HTTP 403 Forbidden ; réponse du serveur : '<!DOCTYPE html>\\n<html>\\n<head>\\n<title>Maintenance en cours</title>\\n<style>\\n    body {\\n        width: 35em;\\n        margin: 0 auto;\\n        font-family: Tahoma, Verdana, Arial, sans-serif;\\n    }\\n</style>\\n</head>\\n<body>\\n<h1>Page indisponible</h1>\\n<p>Une maintenance est en cours sur notre infrastructure'",
-  "Infoclimat ['07579'] [crochets encodés] : HTTP 403 Forbidden ; réponse du serveur : '<!DOCTYPE html>\\n<html>\\n<head>\\n<title>Maintenance en cours</title>\\n<style>\\n    body {\\n        width: 35em;\\n        margin: 0 auto;\\n        font-family: Tahoma, Verdana, Arial, sans-serif;\\n    }\\n</style>\\n</head>\\n<body>\\n<h1>Page indisponible</h1>\\n<p>Une maintenance est en cours sur notre infrastructure'",
-  "Infoclimat ['07645'] [crochets en clair] : HTTP 403 Forbidden ; réponse du serveur : '<!DOCTYPE html>\\n<html>\\n<head>\\n<title>Maintenance en cours</title>\\n<style>\\n    body {\\n        width: 35em;\\n        margin: 0 auto;\\n        font-family: Tahoma, Verdana, Arial, sans-serif;\\n    }\\n</style>\\n</head>\\n<body>\\n<h1>Page indisponible</h1>\\n<p>Une maintenance est en cours sur notre infrastructure'",
-  "Infoclimat ['07645'] [crochets encodés] : HTTP 403 Forbidden ; réponse du serveur : '<!DOCTYPE html>\\n<html>\\n<head>\\n<title>Maintenance en cours</title>\\n<style>\\n    body {\\n        width: 35em;\\n        margin: 0 auto;\\n        font-family: Tahoma, Verdana, Arial, sans-serif;\\n    }\\n</style>\\n</head>\\n<body>\\n<h1>Page indisponible</h1>\\n<p>Une maintenance est en cours sur notre infrastructure'",
-  "Infoclimat ['MF07033001'] [crochets en clair] : HTTP 403 Forbidden ; réponse du serveur : '<!DOCTYPE html>\\n<html>\\n<head>\\n<title>Maintenance en cours</title>\\n<style>\\n    body {\\n        width: 35em;\\n        margin: 0 auto;\\n        font-family: Tahoma, Verdana, Arial, sans-serif;\\n    }\\n</style>\\n</head>\\n<body>\\n<h1>Page indisponible</h1>\\n<p>Une maintenance est en cours sur notre infrastructure'",
-  "Infoclimat ['MF07033001'] [crochets encodés] : HTTP 403 Forbidden ; réponse du serveur : '<!DOCTYPE html>\\n<html>\\n<head>\\n<title>Maintenance en cours</title>\\n<style>\\n    body {\\n        width: 35em;\\n        margin: 0 auto;\\n        font-family: Tahoma, Verdana, Arial, sans-serif;\\n    }\\n</style>\\n</head>\\n<body>\\n<h1>Page indisponible</h1>\\n<p>Une maintenance est en cours sur notre infrastructure'",
-  "Infoclimat : 4 échecs consécutifs, les appels suivants sont suspendus.",
-  "Observations ignorées : 4 échecs consécutifs."
+  "Infoclimat ['07563'] [crochets en clair] : HTTP 400 Bad Request ; réponse du serveur : '{\"errors\":[\"Wrong IP address\"]}'",
+  "Clé Infoclimat refusée : « Wrong IP address ». Cette clé n'est acceptée que depuis une adresse IP précise, or les serveurs GitHub changent d'adresse à chaque exécution. Les appels suivants sont suspendus pour ne pas surcharger Infoclimat.",
+  "Observations ignorées : adresse IP non autorisée pour cette clé (« Wrong IP address »)."
  ],
  "fichiers_observations": [
   "2026-10-24.json",
@@ -21,8 +14,8 @@
   "2026-10-29.json",
   "2026-10-30.json"
  ],
- "genere_utc": "2026-11-02T23:15Z",
- "infoclimat_bloque": "4 échecs consécutifs",
+ "genere_utc": "2026-11-02T23:44Z",
+ "infoclimat_bloque": "adresse IP non autorisée pour cette clé (« Wrong IP address »)",
  "infos": [
   "Clé Infoclimat reçue : 54 caractères"
  ],
