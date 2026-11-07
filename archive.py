@@ -28,7 +28,7 @@ COMMUNE_REF = {
     "Laudun": "000ZB", "Bagnols/Cèze": "000ZB",
     "Nîmes": "07645", "Orange": "07579", "Avignon": "07563", "Uzès": "000OW",
     "Pont-St-Esprit": "MF30202002", "Pierrelatte": "000FU", "Montjoyer": "STATIC0098",
-    "Donzère": "MF26116002", "Lussan": "000ZW", "Barjac": "MF07033001",
+    "Lussan": "000ZW", "Barjac": "MF07033001",
     "Alès": "MF30101001", "Sabran": "STATIC0451",
 }
 REF_IDS = sorted(set(COMMUNE_REF.values()))

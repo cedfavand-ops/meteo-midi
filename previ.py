@@ -12,6 +12,7 @@ Cron conseillé (17h45 locale) :
     45 17 * * *  cd /chemin/previ_gard && python3 previ.py
 """
 from html import escape as hesc
+import re
 import argparse, json, math, random, shutil, sys, time, urllib.error, urllib.parse, urllib.request
 from datetime import datetime, date, timedelta, timezone
 from pathlib import Path
@@ -35,7 +36,6 @@ TX_START_UTC, TX_END_UTC = 6, 18       # jour J 6h -> 18h
 # (nom, latitude, longitude) -- coordonnées approximatives, à affiner
 STATIONS = [
     ("Montjoyer",        44.4970, 4.7640),
-    ("Donzère",          44.4425, 4.7058),
     ("Pierrelatte",      44.3775, 4.6985),
     ("Pont-St-Esprit",   44.2564, 4.6444),
     ("Bagnols/Cèze",     44.1618, 4.6194),
@@ -574,7 +574,7 @@ def bulletin(rows):
 # --------------------------------------------------- BULLETIN LITTÉRAIRE ----
 NB = "\u00a0"                      # espace insécable
 ZONES = {
-    "la vallée du Rhône": ["Montjoyer", "Donzère", "Pierrelatte", "Pont-St-Esprit", "Bagnols/Cèze",
+    "la vallée du Rhône": ["Montjoyer", "Pierrelatte", "Pont-St-Esprit", "Bagnols/Cèze",
                            "Laudun", "Roquemaure", "Orange", "Avignon", "Beaucaire"],
     "les garrigues": ["Nîmes", "Uzès", "Remoulins", "Pouzilhac", "Verfeuil", "Sabran"],
     "le piémont cévenol": ["Lussan", "Barjac", "Alès"],
@@ -912,6 +912,71 @@ def lit_resume(R, S, V, rng):
         out.append("Une journée grise, mais clémente.")
     return " ".join(x for x in out if x)
 
+def _md_inline(txt):
+    """Texte → HTML sûr ; **gras** et *italique* seulement."""
+    txt = hesc(txt, quote=False)
+    txt = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", txt)
+    return re.sub(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)", r"<i>\1</i>", txt)
+
+def bulletin_manuel(d):
+    """Bulletin écrit à la main dans bulletin.txt (à côté de previ.py). None s'il n'y a pas de fichier ou s'il est vide.
+    Format : paragraphes séparés par une ligne vide ; « # Titre » ; « ## Le matin » en tête de paragraphe pour un intertitre ;
+    « > note » pour une ligne discrète ; première ligne facultative « date : AAAA-MM-JJ » (ou JJ/MM/AAAA) :
+    si elle ne correspond pas au jour de la page, un message neutre remplace le texte."""
+    f = Path(__file__).with_name("bulletin.txt")
+    if not f.exists():
+        return None
+    brut = f.read_bytes()
+    try:
+        texte = brut.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        texte = brut.decode("cp1252", "replace")
+    if not texte.strip():
+        return None
+    lignes = texte.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    cible = None
+    i = next((k for k, l in enumerate(lignes) if l.strip()), None)
+    m = re.match(r"^\s*(?:date|pour(?:\s+le)?)\s*:\s*(\d{4}-\d{2}-\d{2}|\d{1,2}/\d{1,2}/\d{4})\s*$", lignes[i], re.I) if i is not None else None
+    if m:
+        try:
+            v = m.group(1)
+            cible = date.fromisoformat(v) if "-" in v else date(int(v[-4:]), int(v.split("/")[1]), int(v.split("/")[0]))
+        except ValueError:
+            print(f"Avertissement : date illisible dans bulletin.txt ({m.group(1)}), ignorée.", file=sys.stderr)
+        del lignes[i]
+    titre = f"Bulletin météo · {cap(JOURS[d.weekday()])} {d.day} {MOIS[d.month-1]}"
+    if cible is not None and cible != d:
+        print(f"bulletin.txt est daté du {cible} mais la page est celle du {d} : texte non affiché.", file=sys.stderr)
+        return (f'<article class="lit"><h2>{titre}</h2><p>Le bulletin de ce jour n’a pas encore été rédigé.</p></article>')
+    parties = []
+    for bloc in re.split(r"\n\s*\n", "\n".join(lignes).strip()):
+        ls = [l.strip() for l in bloc.split("\n") if l.strip()]
+        if ls and ls[0].startswith("# "):
+            titre = hesc(ls[0][2:].strip(), quote=False)
+            ls = ls[1:]
+        if not ls:
+            continue
+        if ls[0].startswith("## "):
+            lab = ls[0][3:].strip().rstrip(".:") + "."
+            parties.append(f'<p><span class="lh">{_md_inline(lab)}</span> {_md_inline(" ".join(ls[1:]))}</p>')
+        elif ls[0].startswith(">"):
+            parties.append('<p class="note">' + _md_inline(" ".join(l.lstrip("> ").strip() for l in ls)) + "</p>")
+        else:
+            parties.append(f'<p>{_md_inline(" ".join(ls))}</p>')
+    if not parties:
+        return None
+    return f'<article class="lit"><h2>{titre}</h2>' + "".join(parties) + "</article>"
+
+def bulletin_du_jour(rows, d):
+    """Le texte de bulletin.txt s'il existe, sinon le bulletin automatique."""
+    try:
+        man = bulletin_manuel(d)
+        if man is not None:
+            return man
+    except Exception as e:                                   # ne jamais bloquer la page
+        print(f"Avertissement : bulletin.txt ignoré ({type(e).__name__} {e}).", file=sys.stderr)
+    return bulletin_litteraire(rows, d)
+
 def bulletin_litteraire(rows, d):
     """Bulletin rédigé (situation, matin, après-midi, résumé), varié d’un jour à l’autre."""
     try:
@@ -934,24 +999,26 @@ def bulletin_litteraire(rows, d):
 TABS = ('<nav class="tabs"><button data-v="tableau" class="on">Tableau</button><button data-v="carte">Carte</button>'
         '<span class="tsep" id="tsep" hidden></span>'
         '<div class="mapbar" id="mapbar" hidden><button data-m="0" class="on">8 h</button><button data-m="1">12 h</button>'
-        '<button data-m="2">16 h</button><button data-m="3">Synthèse 24 h</button><button data-m="4">Bulletin</button></div>'
-        '<div class="mapctl" id="mapctl" hidden><button type="button" id="b-dens" title="Taille des cadres de commune">Cadres : auto</button>'
-        '<button type="button" id="b-fit" title="Revenir à la vue d’ensemble">Tout voir</button>'
-        '<button type="button" id="b-fs" title="Carte en plein écran">Plein écran</button></div></nav>')
+        '<button data-m="2">16 h</button><button data-m="3">Synthèse 24 h</button><button data-m="4">Bulletin</button></div></nav>')
+MAPCTL = ('<div class="mapctl" id="mapctl" hidden><button type="button" id="b-dens" title="Taille des cadres de commune">Cadres : auto</button>'
+          '<button type="button" id="b-fit" title="Revenir à la vue d’ensemble">Tout voir</button>'
+          '<button type="button" id="b-fs" title="Carte en plein écran">Plein écran</button></div>')
 
 MAP_TEMPLATE = r"""<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
 <style>
-.tabs{display:flex;gap:8px;margin:0 0 8px;flex-wrap:wrap;align-items:center}
+.tabs{display:flex;gap:8px;margin:0;flex-wrap:wrap;align-items:center}
 .tsep{width:1px;height:24px;background:var(--line);margin:0 4px}
 .tsep[hidden],.mapbar[hidden],.mapctl[hidden]{display:none}
-.mapctl{display:flex;gap:6px;margin-left:auto;flex-wrap:wrap}
-.tabs button,.mapbar button{background:#0f2a55;color:var(--mut);border:1px solid var(--line);border-radius:999px;
+.mapctl{display:flex;flex-direction:column;gap:6px;flex:none}
+.mapctl button{min-width:150px}
+.tabs button,.mapbar button,.mapctl button{background:#0f2a55;color:var(--mut);border:1px solid var(--line);border-radius:999px;
   padding:6px 18px;font-size:13px;cursor:pointer;font-family:inherit}
 .tabs button.on,.mapbar button.on{background:var(--acc);color:#06203a;border-color:var(--acc);font-weight:600}
 .mapbar{display:flex;gap:6px;flex-wrap:wrap}
-#map{height:calc(100vh - 225px);min-height:460px;border-radius:10px;border:1px solid var(--line);
-  background:#0b1d3a;position:relative;overflow:hidden}
+#mapwrap{display:flex;gap:16px;justify-content:center;align-items:flex-start;flex-wrap:wrap}
+#map{flex:none;width:min(100%,max(460px,calc(100vh - 262px)));aspect-ratio:1/1;height:auto;border-radius:10px;border:1px solid var(--line);background:#0b1d3a;position:relative;overflow:hidden}
+#mapwrap .maphelp{flex:0 1 290px;margin-top:0;font-size:12.5px;line-height:1.6;background:rgba(15,42,85,.55);border:1px solid var(--line);border-radius:10px;padding:10px 14px}
 #map.leaflet-container{background:#0b1d3a;font-family:inherit}
 .mkw{background:none;border:0}
 .tuiles-sombres{filter:url(#fond-sombre)}
@@ -984,13 +1051,15 @@ MAP_TEMPLATE = r"""<link rel="stylesheet" href="https://cdnjs.cloudflare.com/aja
 .mk.sm .mg{font-size:10px;margin-top:1px;gap:3px}.mk.sm .mg b{font-size:12.5px}
 .mk.sm .ar{width:18px;height:18px}
 body.mapfs{padding:0;overflow:hidden}
-body.mapfs header,body.mapfs footer,body.mapfs #vue-tableau,body.mapfs .maphelp{display:none}
-body.mapfs .tabs{position:fixed;left:0;top:0;right:0;z-index:5001;margin:0;padding:8px 10px;background:#0a1c3b;border-bottom:1px solid var(--line)}
+body.mapfs footer,body.mapfs #vue-tableau,body.mapfs .maphelp,body.mapfs .banner .tl,body.mapfs .banner .logo{display:none}
+body.mapfs .banner{position:fixed;left:0;top:0;right:0;z-index:5001;margin:0;padding:8px 10px;background:#0a1c3b;
+  border-bottom:1px solid var(--line);gap:10px}
+body.mapfs .mapctl{flex-direction:row;margin-left:auto}body.mapfs .mapctl button{min-width:0}
 body.mapfs #vue-carte{position:fixed;left:0;right:0;bottom:0;top:52px;z-index:5000;background:#0a1c3b;padding:6px 8px 8px;
   display:flex;flex-direction:column}
 body.mapfs #vue-carte[hidden]{display:none}
-body.mapfs #mapwrap{flex:1;display:flex;flex-direction:column;min-height:0}
-body.mapfs #map{flex:1;height:auto;min-height:0}
+body.mapfs #mapwrap{flex:1;min-height:0}
+body.mapfs #map{width:min(100%,calc(100vh - 80px))}
 body.mapfs #bulpage{flex:1;overflow:auto}
 .mk .wv{text-align:left;line-height:1.2}
 #map.fb{background:radial-gradient(circle at 50% 40%,#12305f,#0a1c3b 75%)}
@@ -1005,7 +1074,7 @@ th.n.clk{cursor:pointer}th.n.clk:hover{color:var(--acc);text-decoration:underlin
 .atmo-bg{position:fixed;left:0;top:0;right:0;bottom:0;background:rgba(3,10,25,.76);z-index:9999;
   display:flex;align-items:center;justify-content:center;padding:12px}
 .atmo-bg[hidden]{display:none}
-.atmo-box{position:relative;width:100%;max-width:860px;max-height:96vh;overflow:auto;
+.atmo-box{position:relative;width:100%;max-width:1200px;max-height:96vh;overflow:auto;
   background:linear-gradient(180deg,#12305f,#0b1d3f);border:1px solid #2f5aa0;border-radius:12px;
   padding:14px 18px 12px;box-shadow:0 10px 40px rgba(0,0,0,.6)}
 .atmo-box h3{margin:0 44px 6px 0;font-size:20px;color:#fff;font-weight:600}
@@ -1013,7 +1082,7 @@ th.n.clk{cursor:pointer}th.n.clk:hover{color:var(--acc);text-decoration:underlin
 .atmo-x{position:absolute;right:10px;top:8px;width:34px;height:34px;border-radius:50%;border:1px solid var(--line);
   background:#0f2a55;color:#e8f0ff;font-size:20px;line-height:1;cursor:pointer}
 .atmo-x:hover{background:var(--acc);color:#06203a}
-.atmo-leg{color:var(--mut);font-size:11.5px;margin-top:6px;line-height:1.5}
+
 #bulpage .lit{max-width:960px;margin:8px auto 0;padding:24px 34px 14px}
 #bulpage .lit h2{font-size:22px;margin-bottom:12px}
 #bulpage .lit p{font-size:17.5px;line-height:1.75}
@@ -1044,10 +1113,6 @@ th.n.clk{cursor:pointer}th.n.clk:hover{color:var(--acc);text-decoration:underlin
     <button class="atmo-x" type="button" aria-label="Fermer">×</button>
     <h3 id="atmo-t"></h3>
     <div id="atmo-svg"></div>
-    <div class="atmo-leg">Heures locales ; fond assombri la nuit. Pictogrammes : ciel de chaque heure (de nuit, les versions « night » du dossier icons si elles existent, sinon les pictogrammes de jour estompés). Les pointillés marquent les échéances 8 h, 12 h et 16 h du tableau. Nébulosité : plus la case est claire,
-      plus le ciel est couvert à cette altitude. Vent : flèche orientée vers où souffle le vent, colorée selon la rafale
-      (<b style="color:#7fa6d6">&lt; 30</b>, <b style="color:#4fc3f7">30-59</b>, <b style="color:#ffd21f">60-79</b>,
-      <b style="color:#ff9a1f">80-99</b>, <b style="color:#ff3b3b">≥ 100</b> km/h). Survolez une heure pour le détail.</div>
   </div>
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
@@ -1177,6 +1242,10 @@ th.n.clk{cursor:pointer}th.n.clk:hover{color:var(--acc);text-decoration:underlin
       });
       BOUNDS = L.latLngBounds(D.communes.map(function(c){return [c.lat,c.lon];}));
       map.fitBounds(BOUNDS, {padding:[70,70]});
+      try {                                       // pas de déplacement ni de dézoom vers les zones sans station
+        var lim = BOUNDS.pad(0.3);
+        map.setMaxBounds(lim); map.options.maxBoundsViscosity = 1.0; map.setMinZoom(map.getBoundsZoom(lim, true));
+      } catch (e) {}
       inited = true;
       map.on('zoomend', function(){ var nd = wantDens(); if (nd !== curD) refresh(); else layout(); });
       layout(); setTimeout(layout, 400);
@@ -1245,27 +1314,31 @@ th.n.clk{cursor:pointer}th.n.clk:hover{color:var(--acc);text-decoration:underlin
       + '" stroke="#06142b" stroke-width="1.3" stroke-linejoin="round"/></g>';
   }
   function atmoSVG(c){
-    var H = c.hr, x0 = 54, x1 = 748, sw = (x1 - x0) / 24, o = [];
+    var H = c.hr, x0 = 54, x1 = 988, sw = (x1 - x0) / 24, o = [];
     function X(h){ return f1(x0 + (h + 0.5) * sw); }
     function tx(x, y, s, col, size, anchor, extra){
       return '<text x="' + x + '" y="' + f1(y) + '" fill="' + col + '" font-size="' + size + '" text-anchor="' + (anchor || 'start') + '"' + (extra || '') + '>' + s + '</text>';
     }
     var BOLD = ' font-weight="600"';
-    o.push('<svg viewBox="0 0 760 536" width="100%" role="img" aria-label="Atmogramme de ' + esc(c.name) + '" style="display:block">');
+    o.push('<svg viewBox="0 0 1000 570" width="100%" role="img" aria-label="Atmogramme de ' + esc(c.name) + '" style="display:block">');
     o.push('<defs><linearGradient id="gT" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4fc3f7" stop-opacity=".5"/>'
          + '<stop offset="1" stop-color="#4fc3f7" stop-opacity="0"/></linearGradient></defs>');
-    // --- Ciel heure par heure (pictogrammes ; versions de nuit si disponibles, sinon jour estompé)
+    // --- Heures (en haut) puis ciel heure par heure (pictogrammes ; nuit : versions « night » si disponibles, sinon jour estompé)
+    for (var hq = 0; hq < 24; hq++) {
+      var ech = (hq === 8 || hq === 12 || hq === 16);
+      o.push(tx(X(hq), 13, hq + ' h', ech ? '#4fc3f7' : '#9db8e6', 11.5, 'middle', ech ? ' font-weight="700"' : ''));
+    }
     var IS = D.isrc || {};
-    o.push(tx(x0 - 7, 22, 'Ciel', '#9db8e6', 10.5, 'end'));
+    o.push(tx(x0 - 7, 42, 'Ciel', '#9db8e6', 11, 'end'));
     for (var q = 0; q < 24; q++) {
       var code = H.pi ? H.pi[q] : null, inf = code != null ? IS[code] : null;
       if (!inf) continue;
       var nuit = H.nu && H.nu[q], src = (nuit && inf.n) ? inf.n : inf.d, lab = esc(inf.l + (nuit ? ' (nuit)' : ''));
-      if (src) o.push('<image href="' + src + '" x="' + f1(x0 + q * sw + 0.8) + '" y="3" width="' + f1(sw - 1.6) + '" height="27" preserveAspectRatio="xMidYMid meet"'
+      if (src) o.push('<image href="' + src + '" x="' + f1(x0 + q * sw + 0.6) + '" y="20" width="' + f1(sw - 1.2) + '" height="40" preserveAspectRatio="xMidYMid meet"'
                       + (nuit && !inf.n ? ' opacity=".45"' : '') + '><title>' + lab + '</title></image>');
-      else o.push(tx(X(q), 25, inf.e, '#fff', 19, 'middle', nuit ? ' opacity=".5"' : ''));
+      else o.push(tx(X(q), 52, inf.e, '#fff', 28, 'middle', nuit ? ' opacity=".5"' : ''));
     }
-    o.push('<g transform="translate(0,36)">');
+    o.push('<g transform="translate(0,68)">');
     if (H.nu) H.nu.forEach(function(n, q){     // heures de nuit : fond assombri
       if (n) o.push('<rect x="' + f1(x0 + q * sw) + '" y="46" width="' + f1(sw) + '" height="400" fill="#020a1e" fill-opacity=".34"/>');
     });
@@ -1275,7 +1348,6 @@ th.n.clk{cursor:pointer}th.n.clk:hover{color:var(--acc);text-decoration:underlin
     }
     [8, 12, 16].forEach(function(e){            // échéances du tableau
       o.push('<line x1="' + X(e) + '" y1="44" x2="' + X(e) + '" y2="446" stroke="#4fc3f7" stroke-opacity=".4" stroke-dasharray="3 4"/>');
-      o.push(tx(X(e), 38, e + ' h', '#4fc3f7', 10, 'middle'));
     });
     // --- Température
     var A0 = 54, A1 = 178, tv = H.t.filter(nz);
@@ -1345,7 +1417,7 @@ th.n.clk{cursor:pointer}th.n.clk:hover{color:var(--acc);text-decoration:underlin
     var PW = []; H.w.forEach(function(w, k){ if (nz(w)) PW.push([X(k), YG(w)]); });
     if (PW.length > 1) o.push('<path d="' + curve(PW) + '" fill="none" stroke="#fff" stroke-width="1.8" stroke-opacity=".9" stroke-linejoin="round"/>');
     H.dd.forEach(function(dd, k){
-      if (nz(dd) && nz(H.g[k])) o.push(garrow(X(k), 456, 17, dd, wcol(H.g[k])));
+      if (nz(dd) && nz(H.g[k])) o.push(garrow(X(k), 456, 21, dd, wcol(H.g[k])));
     });
     // --- survol : détail de chaque heure
     for (var k = 0; k < 24; k++) {
@@ -1496,7 +1568,8 @@ def render(rows, d, generated):
             f'<td class="x rr">{rr} <small>mm</small></td>'
             f'<td class="x g">{wind_cell(r["gmax"], r["gmax_dir"])}</td></tr>')
     tabs = TABS
-    carte = MAP_TEMPLATE.replace("__DATA__", map_payload(rows, d)).replace("__BULLETIN__", bulletin_litteraire(rows, d))
+    mapctl = MAPCTL
+    carte = MAP_TEMPLATE.replace("__DATA__", map_payload(rows, d)).replace("__BULLETIN__", bulletin_du_jour(rows, d))
     titre = f"{JOURS[d.weekday()].capitalize()} {d.day} {MOIS[d.month-1]} {d.year}"
     return f"""<!DOCTYPE html>
 <html lang="fr"><head><meta charset="utf-8">
@@ -1507,9 +1580,10 @@ def render(rows, d, generated):
 *{{box-sizing:border-box}}
 body{{margin:0;background:radial-gradient(circle at 20% 0,#14305e,#081530 70%);color:var(--txt);
 font-family:"Segoe UI",Roboto,Helvetica,Arial,sans-serif;padding:14px 18px}}
-header{{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:8px}}
-.logo{{height:70px;width:auto;border-radius:8px;display:block;box-shadow:0 2px 12px rgba(0,0,0,.5);border:1px solid var(--line)}}
-@media (max-width:700px){{.logo{{height:70px}}}}
+.banner{{display:flex;align-items:center;gap:18px;margin-bottom:10px}}
+.bl{{flex:none;max-width:62%;min-width:0;display:flex;flex-direction:column;gap:8px}}
+.logo{{height:128px;flex:none;margin:0 auto;width:auto;border-radius:8px;display:block;box-shadow:0 2px 12px rgba(0,0,0,.5);border:1px solid var(--line)}}
+@media (max-width:900px){{.banner{{flex-wrap:wrap}} .logo{{height:84px}}}}
 h1{{font-size:20px;margin:0;letter-spacing:.5px}} h1 span{{color:var(--acc)}}
 .sub{{color:var(--mut);font-size:13px;margin-top:3px}}
 .wrap{{overflow-x:auto}}
@@ -1538,10 +1612,10 @@ td.g{{text-align:left;min-width:92px}}
 footer{{color:var(--mut);font-size:11px;margin-top:8px;line-height:1.5}}
 @media (max-width:900px){{table{{font-size:12px}} .pic{{height:24px}}}}
 </style></head><body>
-<header><div class="tl"><h1>Météo-Midi <span>· Prévisions {titre}</span></h1>
+<div class="banner"><div class="bl"><div class="tl"><h1>Météo-Midi <span>· Prévisions {titre}</span></h1>
 <div class="sub">Édité le {generated}</div></div>
-<img class="logo" src="logo.jpg" alt="Météo-Midi · La météo dans le Gard rhodanien" onerror="this.style.display='none'"></header>
-{tabs}
+{tabs}</div>
+<img class="logo" src="logo.jpg" alt="Météo-Midi · La météo dans le Gard rhodanien" onerror="this.style.display='none'">{mapctl}</div>
 <div id="vue-tableau">
 <div class="wrap"><table>
 <thead>
