@@ -999,7 +999,7 @@ def bulletin_litteraire(rows, d):
 TABS = ('<nav class="tabs"><button data-v="tableau" class="on">Tableau</button><button data-v="carte">Carte</button>'
         '<span class="tsep" id="tsep" hidden></span>'
         '<div class="mapbar" id="mapbar" hidden><button data-m="0" class="on">8 h</button><button data-m="1">12 h</button>'
-        '<button data-m="2">16 h</button><button data-m="3">Synthèse 24 h</button><button data-m="4">Bulletin</button></div></nav>')
+        '<button data-m="2">16 h</button><button data-m="3">Synthèse 24 h</button></div></nav>')
 MAPCTL = ('<div class="mapctl" id="mapctl" hidden><button type="button" id="b-dens" title="Taille des cadres de commune">Cadres : auto</button>'
           '<button type="button" id="b-fit" title="Revenir à la vue d’ensemble">Tout voir</button>'
           '<button type="button" id="b-fs" title="Carte en plein écran">Plein écran</button></div>')
@@ -1010,15 +1010,19 @@ MAP_TEMPLATE = r"""<link rel="stylesheet" href="https://cdnjs.cloudflare.com/aja
 .tabs{display:flex;gap:8px;margin:0;flex-wrap:wrap;align-items:center}
 .tsep{width:1px;height:24px;background:var(--line);margin:0 4px}
 .tsep[hidden],.mapbar[hidden],.mapctl[hidden]{display:none}
-.mapctl{display:flex;flex-direction:column;gap:6px;flex:none}
-.mapctl button{min-width:150px}
+.mapctl{display:flex;flex-direction:row;gap:6px;flex:none;margin-left:auto;align-self:flex-end}
 .tabs button,.mapbar button,.mapctl button{background:#0f2a55;color:var(--mut);border:1px solid var(--line);border-radius:999px;
   padding:6px 18px;font-size:13px;cursor:pointer;font-family:inherit}
 .tabs button.on,.mapbar button.on{background:var(--acc);color:#06203a;border-color:var(--acc);font-weight:600}
 .mapbar{display:flex;gap:6px;flex-wrap:wrap}
-#mapwrap{display:flex;gap:16px;justify-content:center;align-items:flex-start;flex-wrap:wrap}
-#map{flex:none;width:min(100%,max(460px,calc(100vh - 262px)));aspect-ratio:1/1;height:auto;border-radius:10px;border:1px solid var(--line);background:#0b1d3a;position:relative;overflow:hidden}
-#mapwrap .maphelp{flex:0 1 290px;margin-top:0;font-size:12.5px;line-height:1.6;background:rgba(15,42,85,.55);border:1px solid var(--line);border-radius:10px;padding:10px 14px}
+#mapwrap{display:grid;grid-template-columns:minmax(300px,380px) minmax(0,1000px);gap:12px 18px;justify-content:center;align-items:start}
+.logo-map{grid-column:2;grid-row:1;justify-self:center;height:116px;width:auto;border-radius:8px;box-shadow:0 2px 12px rgba(0,0,0,.5);
+  border:1px solid var(--line)}
+#bulside{grid-column:1;grid-row:2}
+#map{grid-column:2;grid-row:2;width:100%;aspect-ratio:1/1;height:auto;border-radius:10px;border:1px solid var(--line);
+  background:#0b1d3a;position:relative;overflow:hidden}
+body.vue-carte .banner .logo{display:none}
+@media (max-width:1500px){#mapwrap{grid-template-columns:minmax(0,1000px)}.logo-map{grid-column:1}#map{grid-column:1;grid-row:2}#bulside{grid-column:1;grid-row:3}}
 #map.leaflet-container{background:#0b1d3a;font-family:inherit}
 .mkw{background:none;border:0}
 .tuiles-sombres{filter:url(#fond-sombre)}
@@ -1051,16 +1055,15 @@ MAP_TEMPLATE = r"""<link rel="stylesheet" href="https://cdnjs.cloudflare.com/aja
 .mk.sm .mg{font-size:10px;margin-top:1px;gap:3px}.mk.sm .mg b{font-size:12.5px}
 .mk.sm .ar{width:18px;height:18px}
 body.mapfs{padding:0;overflow:hidden}
-body.mapfs footer,body.mapfs #vue-tableau,body.mapfs .maphelp,body.mapfs .banner .tl,body.mapfs .banner .logo{display:none}
+body.mapfs footer,body.mapfs #vue-tableau,body.mapfs #bulside,body.mapfs .logo-map,body.mapfs .banner .tl,body.mapfs .banner .logo{display:none}
 body.mapfs .banner{position:fixed;left:0;top:0;right:0;z-index:5001;margin:0;padding:8px 10px;background:#0a1c3b;
   border-bottom:1px solid var(--line);gap:10px}
 body.mapfs .mapctl{flex-direction:row;margin-left:auto}body.mapfs .mapctl button{min-width:0}
 body.mapfs #vue-carte{position:fixed;left:0;right:0;bottom:0;top:52px;z-index:5000;background:#0a1c3b;padding:6px 8px 8px;
   display:flex;flex-direction:column}
 body.mapfs #vue-carte[hidden]{display:none}
-body.mapfs #mapwrap{flex:1;min-height:0}
-body.mapfs #map{width:min(100%,calc(100vh - 80px))}
-body.mapfs #bulpage{flex:1;overflow:auto}
+body.mapfs #mapwrap{flex:1;min-height:0;display:flex;justify-content:center;align-items:flex-start}
+body.mapfs #map{flex:none;width:min(100%,calc(100vh - 80px))}
 .mk .wv{text-align:left;line-height:1.2}
 #map.fb{background:radial-gradient(circle at 50% 40%,#12305f,#0a1c3b 75%)}
 .fbx{position:absolute;left:0;top:0;right:0;bottom:0}
@@ -1068,7 +1071,6 @@ body.mapfs #bulpage{flex:1;overflow:auto}
 .fbl{position:absolute;left:0;top:0;pointer-events:none}
 .fbm .mk{position:relative}
 .fbnote{position:absolute;left:10px;bottom:6px;font-size:11px;color:var(--mut)}
-.maphelp{color:var(--mut);font-size:12px;margin-top:6px}
 .mk{cursor:pointer}
 th.n.clk{cursor:pointer}th.n.clk:hover{color:var(--acc);text-decoration:underline}
 .atmo-bg{position:fixed;left:0;top:0;right:0;bottom:0;background:rgba(3,10,25,.76);z-index:9999;
@@ -1083,10 +1085,10 @@ th.n.clk{cursor:pointer}th.n.clk:hover{color:var(--acc);text-decoration:underlin
   background:#0f2a55;color:#e8f0ff;font-size:20px;line-height:1;cursor:pointer}
 .atmo-x:hover{background:var(--acc);color:#06203a}
 
-#bulpage .lit{max-width:960px;margin:8px auto 0;padding:24px 34px 14px}
-#bulpage .lit h2{font-size:22px;margin-bottom:12px}
-#bulpage .lit p{font-size:17.5px;line-height:1.75}
-#bulpage .lit p.note{font-size:12.5px;line-height:1.5}
+#bulside .lit{margin:0;padding:16px 18px 10px;max-height:1000px;overflow:auto}
+#bulside .lit h2{font-size:18px;margin-bottom:8px}
+#bulside .lit p{font-size:14.5px;line-height:1.6;text-align:left;hyphens:manual}
+#bulside .lit p.note{font-size:12px;line-height:1.5}
 .lit{margin-top:16px;background:linear-gradient(180deg,#112b55,#0d2147);border:1px solid var(--line);
   border-left:4px solid var(--acc);border-radius:10px;padding:16px 24px 10px;
   font-family:Georgia,"Times New Roman",serif}
@@ -1099,13 +1101,11 @@ th.n.clk{cursor:pointer}th.n.clk:hover{color:var(--acc);text-decoration:underlin
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><filter id="fond-sombre" color-interpolation-filters="sRGB"><feColorMatrix type="matrix" values="-0.2551 -0.8582 -0.0866 0.0000 1.2392 -0.2750 -0.9250 -0.0934 0.0000 1.3953 -0.2778 -0.9345 -0.0943 0.0000 1.5184 0.0000 0.0000 0.0000 1.0000 0.0000"/></filter></svg>
 <section id="vue-carte" hidden>
   <div id="mapwrap">
-    <div id="map"></div>
-    <div class="maphelp"><b>Cliquez sur une commune</b> pour son atmogramme horaire · flèche = sens vers lequel souffle le vent, colorée selon la
-      rafale (<b style="color:#4fc3f7">bleu</b> sous 60, <b style="color:#ffd21f">jaune</b> dès 60, <b style="color:#ff9a1f">orange</b> dès 80,
-      <b style="color:#ff3b3b">rouge</b> dès 100 km/h ; rafales arrondies à la dizaine) · Synthèse : Tx en rouge, Tn en bleu.</div>
-  </div>
-  <div id="bulpage" hidden>
+    <img class="logo-map" src="logo.jpg" alt="Météo-Midi · La météo dans le Gard rhodanien" onerror="this.style.display='none'">
+    <aside id="bulside">
   __BULLETIN__
+    </aside>
+    <div id="map"></div>
   </div>
 </section>
 <div id="atmo" class="atmo-bg" hidden>
@@ -1163,7 +1163,10 @@ th.n.clk{cursor:pointer}th.n.clk:hover{color:var(--acc);text-decoration:underlin
       }
       for (i = 0; i < n; i++) {
         C[i].x += (P[i].x - C[i].x) * 0.006; C[i].y += ((P[i].y-7) - C[i].y) * 0.006;
-        if (bnd) { C[i].x = Math.min(Math.max(C[i].x, bnd.x0), bnd.x1); C[i].y = Math.min(Math.max(C[i].y, bnd.y0), bnd.y1); }
+        if (bnd) {                            // cadre gardé dans la zone visible (sauf commune hors de l'écran)
+          var v = bnd.vp, dedans = !v || (P[i].x > v.x0 - 40 && P[i].x < v.x1 + 40 && P[i].y > v.y0 - 40 && P[i].y < v.y1 + 40);
+          if (dedans) { C[i].x = Math.min(Math.max(C[i].x, bnd.x0), bnd.x1); C[i].y = Math.min(Math.max(C[i].y, bnd.y0), bnd.y1); }
+        }
       }
       if (!moved) break;
     }
@@ -1178,7 +1181,9 @@ th.n.clk{cursor:pointer}th.n.clk:hover{color:var(--acc);text-decoration:underlin
     var q = dims(), W = q.w, h = q.h, C, P;
     if (map) {
       P = D.communes.map(function(c){var q = map.latLngToLayerPoint([c.lat,c.lon]); return {x:q.x, y:q.y};});
-      C = declutter(P, W, h, null);
+      var sz = map.getSize(), tl = map.containerPointToLayerPoint([0, 0]);
+      var vp = {x0: tl.x, x1: tl.x + sz.x, y0: tl.y, y1: tl.y + sz.y};
+      C = declutter(P, W, h, {x0: vp.x0 + W/2 + 6, x1: vp.x1 - W/2 - 6, y0: vp.y0 + h + 12, y1: vp.y1 - 12, vp: vp});
       D.communes.forEach(function(c,i){
         var ll = map.layerPointToLatLng(L.point(C[i].x, C[i].y+7));
         mk[i].setLatLng(ll);
@@ -1200,6 +1205,11 @@ th.n.clk{cursor:pointer}th.n.clk:hover{color:var(--acc);text-decoration:underlin
       });
       var s = $('.fbl'); s.setAttribute('width', Wb); s.setAttribute('height', Hb); s.innerHTML = svg;
     }
+  }
+  function fitAll(){                           // vue d'ensemble : marges = taille d'un cadre (il se dessine au-dessus de son point)
+    if (!map || !BOUNDS) return;
+    var q = dims(), px = q.w / 2 + 24;
+    map.fitBounds(BOUNDS, {paddingTopLeft: [px, q.h + 34], paddingBottomRight: [px, 28]});
   }
   var started = false;
   function withLeaflet(cb){                    // Leaflet : cdnjs d'abord, jsDelivr en secours
@@ -1241,7 +1251,7 @@ th.n.clk{cursor:pointer}th.n.clk:hover{color:var(--acc);text-decoration:underlin
         mk.push(mm);
       });
       BOUNDS = L.latLngBounds(D.communes.map(function(c){return [c.lat,c.lon];}));
-      map.fitBounds(BOUNDS, {padding:[70,70]});
+      fitAll();
       try {                                       // pas de déplacement ni de dézoom vers les zones sans station
         var lim = BOUNDS.pad(0.3);
         map.setMaxBounds(lim); map.options.maxBoundsViscosity = 1.0; map.setMinZoom(map.getBoundsZoom(lim, true));
@@ -1279,6 +1289,7 @@ th.n.clk{cursor:pointer}th.n.clk:hover{color:var(--acc);text-decoration:underlin
     $('#vue-carte').hidden = (v !== 'carte');
     document.querySelectorAll('.tabs button[data-v]').forEach(function(b){b.classList.toggle('on', b.dataset.v===v);});
     ['tsep','mapbar','mapctl'].forEach(function(id){ $('#'+id).hidden = (v !== 'carte'); });
+    document.body.classList.toggle('vue-carte', v === 'carte');
     if (v !== 'carte') document.body.classList.remove('mapfs');
     if (v === 'carte') { init(); if (map) map.invalidateSize(); }
     try { history.replaceState(null, '', v==='carte' ? '#carte' : location.pathname+location.search); } catch(e) {}
@@ -1452,17 +1463,10 @@ th.n.clk{cursor:pointer}th.n.clk:hover{color:var(--acc);text-decoration:underlin
     th.onclick = function(){ if (i >= 0) openAtmo(i); };
     th.onkeydown = function(e){ if ((e.key === 'Enter' || e.key === ' ') && i >= 0) { e.preventDefault(); openAtmo(i); } };
   });
-  function showBul(on){                          // page « Bulletin » : remplace la carte
-    $('#mapwrap').hidden = on; $('#bulpage').hidden = !on; $('#mapctl').hidden = on;
-    if (!on && map) { map.invalidateSize(); layout(); }
-    try { history.replaceState(null, '', on ? '#bulletin' : '#carte'); } catch(e) {}
-  }
   document.querySelectorAll('.mapbar button').forEach(function(b){
     b.onclick = function(){
-      var m = +b.dataset.m;
       document.querySelectorAll('.mapbar button').forEach(function(x){x.classList.toggle('on', x===b);});
-      if (m === 4) { showBul(true); return; }
-      showBul(false); mode = m; refresh();
+      mode = +b.dataset.m; refresh();
     };
   });
   function toggleFs(){
@@ -1471,7 +1475,7 @@ th.n.clk{cursor:pointer}th.n.clk:hover{color:var(--acc);text-decoration:underlin
     setTimeout(function(){ if (map) map.invalidateSize(); layout(); }, 80);
   }
   $('#b-fs').onclick = toggleFs;
-  $('#b-fit').onclick = function(){ if (map && BOUNDS) map.fitBounds(BOUNDS, {padding:[70,70]}); layout(); };
+  $('#b-fit').onclick = function(){ fitAll(); layout(); };
   $('#b-dens').onclick = function(){
     pref = pref === 'auto' ? 'compact' : pref === 'compact' ? 'full' : 'auto';
     this.textContent = 'Cadres : ' + (pref === 'auto' ? 'auto' : pref === 'compact' ? 'compacts' : 'détaillés');
@@ -1480,7 +1484,6 @@ th.n.clk{cursor:pointer}th.n.clk:hover{color:var(--acc);text-decoration:underlin
   window.addEventListener('resize', function(){ if (inited) { if (map) map.invalidateSize(); layout(); } });
   var h0 = location.hash;
   view(h0 === '#carte' || h0 === '#bulletin' ? 'carte' : 'tableau');
-  if (h0 === '#bulletin') { var bb = $('.mapbar button[data-m="4"]'); if (bb) bb.click(); }
 })();
 </script>
 """
@@ -1582,7 +1585,7 @@ body{{margin:0;background:radial-gradient(circle at 20% 0,#14305e,#081530 70%);c
 font-family:"Segoe UI",Roboto,Helvetica,Arial,sans-serif;padding:14px 18px}}
 .banner{{display:flex;align-items:center;gap:18px;margin-bottom:10px}}
 .bl{{flex:none;max-width:62%;min-width:0;display:flex;flex-direction:column;gap:8px}}
-.logo{{height:128px;flex:none;margin:0 auto;width:auto;border-radius:8px;display:block;box-shadow:0 2px 12px rgba(0,0,0,.5);border:1px solid var(--line)}}
+.logo{{height:128px;flex:none;margin:0 0 0 auto;width:auto;border-radius:8px;display:block;box-shadow:0 2px 12px rgba(0,0,0,.5);border:1px solid var(--line)}}
 @media (max-width:900px){{.banner{{flex-wrap:wrap}} .logo{{height:84px}}}}
 h1{{font-size:20px;margin:0;letter-spacing:.5px}} h1 span{{color:var(--acc)}}
 .sub{{color:var(--mut);font-size:13px;margin-top:3px}}
