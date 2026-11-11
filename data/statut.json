@@ -14,12 +14,12 @@
   "2026-10-29.json",
   "2026-10-30.json"
  ],
- "genere_utc": "2026-11-10T22:00Z",
+ "genere_utc": "2026-11-11T13:37Z",
  "infoclimat_bloque": "adresse IP non autorisée pour cette clé (« Wrong IP address »)",
  "infos": [
   "Clé Infoclimat reçue : 54 caractères"
  ],
- "jour_prevu": "2026-11-11",
+ "jour_prevu": "2026-11-12",
  "stations_connues": 6,
  "stations_refusees": []
 }
