@@ -1001,8 +1001,7 @@ TABS = ('<nav class="tabs"><button data-v="tableau" class="on">Tableau</button><
         '<div class="mapbar" id="mapbar" hidden><button data-m="0" class="on">8 h</button><button data-m="1">12 h</button>'
         '<button data-m="2">16 h</button><button data-m="3">Synthèse 24 h</button></div></nav>')
 MAPCTL = ('<div class="mapctl" id="mapctl" hidden><button type="button" id="b-dens" title="Taille des cadres de commune">Cadres : auto</button>'
-          '<button type="button" id="b-fit" title="Revenir à la vue d’ensemble">Tout voir</button>'
-          '<button type="button" id="b-fs" title="Carte en plein écran">Plein écran</button></div>')
+          '<button type="button" id="b-fit" title="Revenir à la vue d’ensemble">Tout voir</button></div>')
 
 MAP_TEMPLATE = r"""<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
@@ -1015,14 +1014,27 @@ MAP_TEMPLATE = r"""<link rel="stylesheet" href="https://cdnjs.cloudflare.com/aja
   padding:6px 18px;font-size:13px;cursor:pointer;font-family:inherit}
 .tabs button.on,.mapbar button.on{background:var(--acc);color:#06203a;border-color:var(--acc);font-weight:600}
 .mapbar{display:flex;gap:6px;flex-wrap:wrap}
-#mapwrap{display:grid;grid-template-columns:minmax(300px,380px) minmax(0,1000px);gap:12px 18px;justify-content:center;align-items:start}
-.logo-map{grid-column:2;grid-row:1;justify-self:center;height:116px;width:auto;border-radius:8px;box-shadow:0 2px 12px rgba(0,0,0,.5);
-  border:1px solid var(--line)}
-#bulside{grid-column:1;grid-row:2}
-#map{grid-column:2;grid-row:2;width:100%;aspect-ratio:1/1;height:auto;border-radius:10px;border:1px solid var(--line);
-  background:#0b1d3a;position:relative;overflow:hidden}
+body.vue-carte{height:100vh;overflow:hidden;display:flex;flex-direction:column;padding:8px 14px 10px}
+body.vue-carte .banner{margin:0 0 6px;flex:none}
 body.vue-carte .banner .logo{display:none}
-@media (max-width:1500px){#mapwrap{grid-template-columns:minmax(0,1000px)}.logo-map{grid-column:1}#map{grid-column:1;grid-row:2}#bulside{grid-column:1;grid-row:3}}
+body.vue-carte .bl{flex:1;max-width:none;flex-direction:row;align-items:center;gap:22px}
+body.vue-carte .tl h1{font-size:17px;white-space:nowrap}
+body.vue-carte .tl .sub{display:none}
+body.vue-carte #vue-carte{flex:1;min-height:0}
+body.vue-carte footer{display:none}
+#mapwrap{height:100%;display:grid;grid-template-columns:400px auto;grid-template-rows:auto minmax(0,1fr);gap:8px 18px;
+  justify-content:center;align-content:start}
+.logo-map{grid-column:2;grid-row:1;justify-self:center;height:76px;width:auto;border-radius:8px;
+  box-shadow:0 2px 12px rgba(0,0,0,.5);border:1px solid var(--line)}
+#bulside{grid-column:1;grid-row:1 / span 2;min-height:0;display:flex;flex-direction:column;gap:6px}
+#map{grid-column:2;grid-row:2;width:var(--S,860px);height:var(--S,860px);border-radius:10px;border:1px solid var(--line);
+  background:#0b1d3a;position:relative;overflow:hidden}
+.bulfoot{flex:none;font-size:11px;color:var(--mut);line-height:1.5}.bulfoot a{color:var(--acc)}
+@media (max-width:1100px){
+  body.vue-carte{height:auto;overflow:auto;display:block}
+  #mapwrap{display:flex;flex-direction:column;align-items:center;height:auto}
+  #bulside{order:3;width:100%;max-width:700px}.logo-map{height:64px}
+}
 #map.leaflet-container{background:#0b1d3a;font-family:inherit}
 .mkw{background:none;border:0}
 .tuiles-sombres{filter:url(#fond-sombre)}
@@ -1033,14 +1045,13 @@ body.vue-carte .banner .logo{display:none}
 .mk{position:absolute;left:0;right:0;bottom:0;box-sizing:border-box;display:flex;flex-direction:column;align-items:center;
   background:rgba(9,25,52,.86);border:1px solid #2f5aa0;border-radius:11px;color:#e8f0ff;line-height:1.15;
   text-align:center;box-shadow:0 2px 9px rgba(0,0,0,.6);padding:5px 5px 6px}
-.mk::after{content:"";position:absolute;left:50%;bottom:-7px;margin-left:-6px;border:6px solid transparent;
-  border-bottom:0;border-top:7px solid #2f5aa0}
 .mk .mn{font-size:12.5px;font-weight:600;line-height:16px;color:#d6e5ff;max-width:100%;overflow:hidden;
   text-overflow:ellipsis;white-space:nowrap}
 .mk .mi{height:46px;margin:3px 0 2px;display:flex;align-items:center;justify-content:center}
 .mk .pic{height:44px;width:auto}.mk .emo{font-size:36px;line-height:44px}
 .mk .mt b{font-size:22px;font-weight:700}.mk .mt.tx b{font-size:24px;font-weight:800;color:#ff1f1f}
 .mk .mt.tn b{font-size:15px;font-weight:700;color:#4dc3ff}
+.mk .mr.z{opacity:.4}
 .mk .mr{font-size:11px;color:#9ad0ff;white-space:nowrap;margin-top:1px}
 .mk .mg{display:flex;align-items:center;justify-content:center;gap:4px;font-size:11px;color:#cfe0ff;white-space:nowrap;margin-top:2px}
 .mk .mg b{font-size:14px;color:#fff}.mk .mg i{font-style:normal;color:#8fd3ff}
@@ -1054,16 +1065,14 @@ body.vue-carte .banner .logo{display:none}
 .mk.sm .mr{font-size:9.5px;margin-top:0}
 .mk.sm .mg{font-size:10px;margin-top:1px;gap:3px}.mk.sm .mg b{font-size:12.5px}
 .mk.sm .ar{width:18px;height:18px}
-body.mapfs{padding:0;overflow:hidden}
-body.mapfs footer,body.mapfs #vue-tableau,body.mapfs #bulside,body.mapfs .logo-map,body.mapfs .banner .tl,body.mapfs .banner .logo{display:none}
-body.mapfs .banner{position:fixed;left:0;top:0;right:0;z-index:5001;margin:0;padding:8px 10px;background:#0a1c3b;
-  border-bottom:1px solid var(--line);gap:10px}
-body.mapfs .mapctl{flex-direction:row;margin-left:auto}body.mapfs .mapctl button{min-width:0}
-body.mapfs #vue-carte{position:fixed;left:0;right:0;bottom:0;top:52px;z-index:5000;background:#0a1c3b;padding:6px 8px 8px;
-  display:flex;flex-direction:column}
-body.mapfs #vue-carte[hidden]{display:none}
-body.mapfs #mapwrap{flex:1;min-height:0;display:flex;justify-content:center;align-items:flex-start}
-body.mapfs #map{flex:none;width:min(100%,calc(100vh - 80px))}
+.mk.xs{padding:2px 3px 3px;border-radius:8px}
+.mk.xs .mn{font-size:10.5px;line-height:12px}
+.mk.xs .row{gap:3px;margin:1px 0}
+.mk.xs .mi{height:24px}.mk.xs .pic{height:24px}.mk.xs .emo{font-size:19px;line-height:24px}
+.mk.xs .mt b{font-size:15px}.mk.xs .mt.tx b{font-size:16px}.mk.xs .mt.tn b{font-size:11px}
+.mk.xs .mr{font-size:8.5px}
+.mk.xs .mg{font-size:9px;gap:2px;margin-top:0}.mk.xs .mg b{font-size:11px}
+.mk.xs .ar{width:14px;height:14px}
 .mk .wv{text-align:left;line-height:1.2}
 #map.fb{background:radial-gradient(circle at 50% 40%,#12305f,#0a1c3b 75%)}
 .fbx{position:absolute;left:0;top:0;right:0;bottom:0}
@@ -1085,7 +1094,7 @@ th.n.clk{cursor:pointer}th.n.clk:hover{color:var(--acc);text-decoration:underlin
   background:#0f2a55;color:#e8f0ff;font-size:20px;line-height:1;cursor:pointer}
 .atmo-x:hover{background:var(--acc);color:#06203a}
 
-#bulside .lit{margin:0;padding:16px 18px 10px;max-height:1000px;overflow:auto}
+#bulside .lit{margin:0;padding:16px 18px 10px;flex:1;min-height:0;overflow:auto}
 #bulside .lit h2{font-size:18px;margin-bottom:8px}
 #bulside .lit p{font-size:14.5px;line-height:1.6;text-align:left;hyphens:manual}
 #bulside .lit p.note{font-size:12px;line-height:1.5}
@@ -1104,6 +1113,7 @@ th.n.clk{cursor:pointer}th.n.clk:hover{color:var(--acc);text-decoration:underlin
     <img class="logo-map" src="logo.jpg" alt="Météo-Midi · La météo dans le Gard rhodanien" onerror="this.style.display='none'">
     <aside id="bulside">
   __BULLETIN__
+      <div class="bulfoot">Édité le __EDITE__ · Pictogrammes © <a href="https://content.meteoblue.com/en/research-education/specifications/standards/symbols-and-pictograms">meteoblue</a> · Fond de carte © OpenStreetMap contributors</div>
     </aside>
     <div id="map"></div>
   </div>
@@ -1120,8 +1130,19 @@ th.n.clk{cursor:pointer}th.n.clk:hover{color:var(--acc);text-decoration:underlin
 (function(){
   var D = __DATA__;
   var mode = 0, map = null, inited = false, mk = [], lines = [], FB = null;
-  var DENS = {sm:{w:92, h:[82,82,82,100]}, lg:{w:104, h:[136,136,136,170]}}, pref = 'auto', curD = 'sm', BOUNDS = null;
-  function wantDens(){ if (pref !== 'auto') return pref === 'compact' ? 'sm' : 'lg'; return (map && map.getZoom() >= 10.75) ? 'lg' : 'sm'; }
+  var DENS = {xs:{w:80, h:[62,62,62,82]}, sm:{w:92, h:[82,82,82,100]}, lg:{w:104, h:[136,136,136,170]}}, pref = 'auto', curD = 'sm', BOUNDS = null;
+  function wantDens(){
+    if (pref === 'compact') return 'sm';
+    if (pref === 'full') return 'lg';
+    if (!inited) return 'sm';
+    var vp = viewport(), P = anchorPts();       // vue d'ensemble : cadres détaillés si la grille les accepte ; zoomé : selon le zoom
+    if (allInside(P, vp)) {                      // du plus lisible au plus compact, selon la place disponible
+      var ordre = ['lg', 'sm'];
+      for (var k = 0; k < ordre.length; k++) if (gridPlan(P.length, vp, DENS[ordre[k]].w, DENS[ordre[k]].h[mode])) return ordre[k];
+      return 'xs';
+    }
+    return (map && map.getZoom() >= 10.75) ? 'lg' : 'sm';
+  }
   function dims(){ var d = DENS[curD]; return {w:d.w, h:d.h[mode]}; }
   function $(s){return document.querySelector(s);}
   function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;');}
@@ -1137,33 +1158,54 @@ th.n.clk{cursor:pointer}th.n.clk:hover{color:var(--acc);text-decoration:underlin
     return '<div class="mg">'+arrow(dd, g)+'<span><b>'+g+'</b> km/h</span></div>';
   }
   function card(c){
-    var sm = curD === 'sm', cl = sm ? 'mk sm' : 'mk';
+    var sm = curD !== 'lg', cl = curD === 'xs' ? 'mk xs' : sm ? 'mk sm' : 'mk';
     var name = '<div class="mn">'+esc(c.name)+'</div>';
     if (mode < 3) {
       var e = c.ech[mode], ic = '<div class="mi">'+(D.icons[e.p]||'')+'</div>', tt = '<div class="mt">'+T(e.t)+'</div>';
       return '<div class="'+cl+'">'+name+(sm ? '<div class="row">'+ic+tt+'</div>' : ic+tt)+wind(e.g, e.d, e.dd)+'</div>';
     }
-    var rr = (c.rr!=null && c.rr>=0.1) ? '<div class="mr">'+c.rc+' mm</div>' : '';
+    var rr = '<div class="mr'+((c.rr!=null && c.rr>=0.1) ? '' : ' z')+'">'+(c.rc||'0')+' mm</div>';   // toujours présente : cadres de même hauteur
     var ic2 = '<div class="mi">'+(D.icons[c.ech[1].p]||'')+'</div>', tx = '<div class="mt tx">'+T(c.tx)+'</div>', tn = '<div class="mt tn">'+T(c.tn)+'</div>';
     return '<div class="'+cl+'">'+name+(sm ? '<div class="row">'+ic2+'<div class="tt">'+tx+tn+'</div></div>' : ic2+tx+tn)+rr+wind(c.gmax, c.gd, c.gdd)+'</div>';
   }
-  // Écarte les cartes qui se chevauchent. P = positions réelles (px) ; renvoie le bas-centre de chaque carte.
+  var CONT = {top:14, right:14, bottom:30, left:60};   // marges de la carte : commandes à gauche, attribution en bas
+  function viewport(){                           // zone visible (coordonnées « layer » de Leaflet, ou pixels de la boîte de repli)
+    if (map) { var sz = map.getSize(), tl = map.containerPointToLayerPoint([0, 0]); return {x0: tl.x, y0: tl.y, w: sz.x, h: sz.y}; }
+    var b = $('.fbx'); return {x0: 0, y0: 0, w: b ? b.clientWidth : 800, h: b ? b.clientHeight : 800};
+  }
+  function fbAnchors(vp){                        // repli sans fond de carte : projection simple, communes réparties dans la boîte
+    var latc = (FB.a+FB.b)/2, lonc = (FB.x0+FB.x1)/2, kx = 111.32*Math.cos(latc*Math.PI/180), ky = 110.57;
+    var L0 = CONT.left + 40, R0 = 40, T0 = 50, B0 = CONT.bottom + 30;
+    var sc = Math.min((vp.w-L0-R0)/((FB.x1-FB.x0)*kx), (vp.h-T0-B0)/((FB.b-FB.a)*ky));
+    var cx = L0 + (vp.w-L0-R0)/2, cy = T0 + (vp.h-T0-B0)/2;
+    return D.communes.map(function(c){ return {x: cx + (c.lon-lonc)*kx*sc, y: cy - (c.lat-latc)*ky*sc}; });
+  }
+  function anchorPts(){
+    if (!map) return fbAnchors(viewport());
+    return D.communes.map(function(c){ var q = map.latLngToLayerPoint([c.lat, c.lon]); return {x: q.x, y: q.y}; });
+  }
+  function allInside(P, vp){
+    return P.every(function(p){ return p.x >= vp.x0 + 10 && p.x <= vp.x0 + vp.w - 10 && p.y >= vp.y0 + 10 && p.y <= vp.y0 + vp.h - 10; });
+  }
+  // Mode « zoomé » : écarte les cadres qui se chevauchent. L'axe de séparation suit la géographie : si deux communes sont
+  // surtout l'une au-dessus de l'autre, leurs cadres s'empilent (Laudun sous Bagnols) ; sinon ils se mettent côte à côte.
   function declutter(P, w, h, bnd){
-    var gap = 6, n = P.length, C = P.map(function(p){return {x:p.x, y:p.y-7};});
+    var gap = 6, n = P.length, C = P.map(function(p){ return {x: p.x, y: p.y - 8}; });
     for (var it = 0; it < 1500; it++) {
       var moved = false;
-      for (var i = 0; i < n; i++) for (var j = i+1; j < n; j++) {
+      for (var i = 0; i < n; i++) for (var j = i + 1; j < n; j++) {
         var dx = C[j].x - C[i].x, dy = C[j].y - C[i].y;
-        var ox = (w+gap) - Math.abs(dx), oy = (h+gap) - Math.abs(dy);
+        var ox = (w + gap) - Math.abs(dx), oy = (h + gap) - Math.abs(dy);
         if (ox > 0 && oy > 0) {
           moved = true;
-          if (ox < oy) { var sx = (dx >= 0 ? 1 : -1) * ox/2; C[i].x -= sx; C[j].x += sx; }
-          else { var sy = (dy >= 0 ? 1 : -1) * oy/2; C[i].y -= sy; C[j].y += sy; }
+          var ax = P[j].x - P[i].x, ay = P[j].y - P[i].y;
+          if (Math.abs(ay) / (h + gap) > Math.abs(ax) / (w + gap)) { var sy = (ay >= 0 ? 1 : -1) * oy / 2; C[i].y -= sy; C[j].y += sy; }
+          else { var sx = (ax >= 0 ? 1 : -1) * ox / 2; C[i].x -= sx; C[j].x += sx; }
         }
       }
       for (i = 0; i < n; i++) {
-        C[i].x += (P[i].x - C[i].x) * 0.006; C[i].y += ((P[i].y-7) - C[i].y) * 0.006;
-        if (bnd) {                            // cadre gardé dans la zone visible (sauf commune hors de l'écran)
+        C[i].x += (P[i].x - C[i].x) * 0.006; C[i].y += ((P[i].y - 8) - C[i].y) * 0.006;
+        if (bnd) {                               // cadre gardé dans la zone visible (sauf commune hors de l'écran)
           var v = bnd.vp, dedans = !v || (P[i].x > v.x0 - 40 && P[i].x < v.x1 + 40 && P[i].y > v.y0 - 40 && P[i].y < v.y1 + 40);
           if (dedans) { C[i].x = Math.min(Math.max(C[i].x, bnd.x0), bnd.x1); C[i].y = Math.min(Math.max(C[i].y, bnd.y0), bnd.y1); }
         }
@@ -1172,44 +1214,75 @@ th.n.clk{cursor:pointer}th.n.clk:hover{color:var(--acc);text-decoration:underlin
     }
     return C;
   }
+  function gridPlan(n, vp, w, h){                // grille (colonnes x lignes) donnant les cases les plus spacieuses pour n cadres
+    var gap = 22, best = null;
+    for (var c = 1; c <= n; c++) {
+      var r = Math.ceil(n / c), cw = (vp.w - CONT.left - CONT.right) / c, ch = (vp.h - CONT.top - CONT.bottom) / r;
+      var ratio = Math.min(cw / (w + gap), ch / (h + gap));
+      if (ratio < 1) continue;
+      var vide = r * c - n;
+      if (!best || ratio > best.ratio + 0.02 || (Math.abs(ratio - best.ratio) <= 0.02 && vide < best.vide)) best = {c: c, r: r, cw: cw, ch: ch, ratio: ratio, vide: vide};
+    }
+    return best;
+  }
+  // Vue d'ensemble : les communes sont classées du nord au sud, réparties en rangées de même taille, puis ordonnées d'ouest en est
+  // dans chaque rangée. Les cadres sont ainsi régulièrement espacés sur toute la carte et l'ordre géographique est toujours respecté
+  // (par exemple Laudun, plus au sud, se retrouve sur la rangée sous Bagnols).
+  function gridLayout(P, vp, g, h){
+    var n = P.length, r = g.r, base = Math.floor(n / r), extra = n % r, pos = 0, C = new Array(n);
+    var ordre = P.map(function(p, i){ return i; }).sort(function(a, b){ return P[a].y - P[b].y || P[a].x - P[b].x; });
+    var largeur = vp.w - CONT.left - CONT.right;
+    for (var row = 0; row < r; row++) {
+      var ids = ordre.slice(pos, pos + base + (row < extra ? 1 : 0)); pos += ids.length;
+      ids.sort(function(a, b){ return P[a].x - P[b].x; });
+      var pas = largeur / ids.length;
+      ids.forEach(function(i, k){
+        C[i] = {x: vp.x0 + CONT.left + (k + 0.5) * pas, y: vp.y0 + CONT.top + (row + 0.5) * g.ch + h / 2};
+      });
+    }
+    return C;
+  }
   function icon(c){
     var q = dims();
-    return L.divIcon({className:'mkw', html:card(c), iconSize:[q.w,q.h], iconAnchor:[q.w/2,q.h+7]});
+    return L.divIcon({className:'mkw', html:card(c), iconSize:[q.w,q.h], iconAnchor:[q.w/2,q.h]});
+  }
+  function place(C, P, W, h){                    // positionne cadres et traits de rappel (du bord du cadre à la commune)
+    var svg = '';
+    D.communes.forEach(function(c, i){
+      var ax = Math.min(Math.max(P[i].x, C[i].x - W/2), C[i].x + W/2), ay = Math.min(Math.max(P[i].y, C[i].y - h), C[i].y);
+      var dedans = (ax === P[i].x && ay === P[i].y);
+      if (map) {
+        mk[i].setLatLng(map.layerPointToLatLng(L.point(C[i].x, C[i].y)));
+        lines[i].setLatLngs(dedans ? [[c.lat, c.lon], [c.lat, c.lon]] : [[c.lat, c.lon], map.layerPointToLatLng(L.point(ax, ay))]);
+      } else {
+        mk[i].style.width = W + 'px'; mk[i].style.left = C[i].x + 'px'; mk[i].style.top = C[i].y + 'px';
+        if (!dedans) svg += '<line x1="'+ax+'" y1="'+ay+'" x2="'+P[i].x+'" y2="'+P[i].y+'" stroke="#4fc3f7" stroke-opacity=".7"/>';
+        svg += '<circle cx="'+P[i].x+'" cy="'+P[i].y+'" r="3.5" fill="#4fc3f7"/>';
+      }
+    });
+    if (!map) { var s = $('.fbl'), b = $('.fbx'); s.setAttribute('width', b.clientWidth); s.setAttribute('height', b.clientHeight); s.innerHTML = svg; }
   }
   function layout(){
     if (!inited) return;
-    var q = dims(), W = q.w, h = q.h, C, P;
-    if (map) {
-      P = D.communes.map(function(c){var q = map.latLngToLayerPoint([c.lat,c.lon]); return {x:q.x, y:q.y};});
-      var sz = map.getSize(), tl = map.containerPointToLayerPoint([0, 0]);
-      var vp = {x0: tl.x, x1: tl.x + sz.x, y0: tl.y, y1: tl.y + sz.y};
-      C = declutter(P, W, h, {x0: vp.x0 + W/2 + 6, x1: vp.x1 - W/2 - 6, y0: vp.y0 + h + 12, y1: vp.y1 - 12, vp: vp});
-      D.communes.forEach(function(c,i){
-        var ll = map.layerPointToLatLng(L.point(C[i].x, C[i].y+7));
-        mk[i].setLatLng(ll);
-        var far = Math.abs(C[i].x-P[i].x) + Math.abs(C[i].y+7-P[i].y) > 10;
-        lines[i].setLatLngs(far ? [[c.lat,c.lon], ll] : [[c.lat,c.lon],[c.lat,c.lon]]);
-      });
-    } else {
-      var box = $('.fbx'), Wb = box.clientWidth, Hb = box.clientHeight;
-      var latc = (FB.a+FB.b)/2, lonc = (FB.x0+FB.x1)/2, kx = 111.32*Math.cos(latc*Math.PI/180), ky = 110.57;
-      var sc = Math.min((Wb-2*(W/2+40))/((FB.x1-FB.x0)*kx), (Hb-h-60)/((FB.b-FB.a)*ky));
-      P = D.communes.map(function(c){return {
-        x:Wb/2+(c.lon-lonc)*kx*sc, y:(Hb+h)/2-(c.lat-latc)*ky*sc};});
-      C = declutter(P, W, h, {x0:W/2+4, x1:Wb-W/2-4, y0:h+10, y1:Hb-8});
-      var svg = '';
-      D.communes.forEach(function(c,i){
-        mk[i].style.width = W+'px'; mk[i].style.left = C[i].x+'px'; mk[i].style.top = C[i].y+'px';
-        svg += '<line x1="'+C[i].x+'" y1="'+(C[i].y+7)+'" x2="'+P[i].x+'" y2="'+P[i].y+'" stroke="#4fc3f7" stroke-opacity=".7"/>'
-             + '<circle cx="'+P[i].x+'" cy="'+P[i].y+'" r="3" fill="#4fc3f7"/>';
-      });
-      var s = $('.fbl'); s.setAttribute('width', Wb); s.setAttribute('height', Hb); s.innerHTML = svg;
-    }
+    var vp = viewport(), q = dims(), W = q.w, h = q.h, P = anchorPts(), C = null;
+    var g = allInside(P, vp) ? gridPlan(P.length, vp, W, h) : null;
+    if (g) C = gridLayout(P, vp, g, h);
+    if (!C) C = declutter(P, W, h, {x0: vp.x0 + CONT.left + W/2, x1: vp.x0 + vp.w - CONT.right - W/2, y0: vp.y0 + CONT.top + h,
+                                    y1: vp.y0 + vp.h - CONT.bottom, vp: {x0: vp.x0, x1: vp.x0 + vp.w, y0: vp.y0, y1: vp.y0 + vp.h}});
+    place(C, P, W, h);
   }
-  function fitAll(){                           // vue d'ensemble : marges = taille d'un cadre (il se dessine au-dessus de son point)
+  function fitAll(){                             // vue d'ensemble : toutes les communes à l'écran (les cadres sont répartis sur la grille)
     if (!map || !BOUNDS) return;
-    var q = dims(), px = q.w / 2 + 24;
-    map.fitBounds(BOUNDS, {paddingTopLeft: [px, q.h + 34], paddingBottomRight: [px, 28]});
+    map.fitBounds(BOUNDS, {paddingTopLeft: [CONT.left + 40, 56], paddingBottomRight: [56, CONT.bottom + 24], animate: false});
+  }
+  function sizeMap(){                            // carte carrée occupant toute la hauteur restante de l'écran
+    var wrap = $('#mapwrap'); if (!wrap || $('#vue-carte').hidden) return;
+    var narrow = window.innerWidth <= 1100, lm = $('.logo-map'), lh = lm ? lm.offsetHeight : 0;
+    var availH = narrow ? Math.min(window.innerHeight - 170, 900) : wrap.clientHeight - lh - 8;
+    var availW = narrow ? wrap.clientWidth : wrap.clientWidth - 400 - 18;
+    var S = Math.max(380, Math.floor(Math.min(availH, availW, 1400)));
+    $('#map').style.setProperty('--S', S + 'px');
+    if (map) { map.invalidateSize(); layout(); } else if (inited) layout();
   }
   var started = false;
   function withLeaflet(cb){                    // Leaflet : cdnjs d'abord, jsDelivr en secours
@@ -1221,8 +1294,10 @@ th.n.clk{cursor:pointer}th.n.clk:hover{color:var(--acc);text-decoration:underlin
   function init(){
     if (started) return; started = true; withLeaflet(build);
   }
+  function onView(){ var nd = wantDens(); if (nd !== curD) refresh(); else layout(); }
   function build(){
     var el = $('#map');
+    sizeMap();
     curD = wantDens();
     if (window.L) {
       map = L.map(el, {minZoom:8, maxZoom:14, zoomSnap:0.25, zoomDelta:0.5});
@@ -1235,7 +1310,7 @@ th.n.clk{cursor:pointer}th.n.clk:hover{color:var(--acc);text-decoration:underlin
           {maxZoom:14, subdomains:'abc', attribution:'© OpenStreetMap, SRTM · © OpenTopoMap'})
       };
       fonds['Sombre'].addTo(map);
-      L.control.layers(fonds, null, {position:'topright', collapsed:true}).addTo(map);
+      L.control.layers(fonds, null, {position:'bottomleft', collapsed:true}).addTo(map);
       var okT = 0, koT = 0;                    // si le fond sombre ne charge rien, bascule sur « Relief »
       fonds['Sombre'].on('tileload', function(){ okT++; });
       fonds['Sombre'].on('tileerror', function(){
@@ -1243,7 +1318,7 @@ th.n.clk{cursor:pointer}th.n.clk:hover{color:var(--acc);text-decoration:underlin
       });
       D.communes.forEach(function(c){
         lines.push(L.polyline([[c.lat,c.lon],[c.lat,c.lon]], {color:'#4fc3f7', weight:1, opacity:.75, interactive:false}).addTo(map));
-        L.circleMarker([c.lat,c.lon], {radius:3, color:'#4fc3f7', weight:1, fillColor:'#4fc3f7', fillOpacity:1, interactive:false}).addTo(map);
+        L.circleMarker([c.lat,c.lon], {radius:3.5, color:'#4fc3f7', weight:1, fillColor:'#4fc3f7', fillOpacity:1, interactive:false}).addTo(map);
       });
       D.communes.forEach(function(c,i){
         var mm = L.marker([c.lat,c.lon], {icon:icon(c), keyboard:false}).addTo(map);
@@ -1251,14 +1326,10 @@ th.n.clk{cursor:pointer}th.n.clk:hover{color:var(--acc);text-decoration:underlin
         mk.push(mm);
       });
       BOUNDS = L.latLngBounds(D.communes.map(function(c){return [c.lat,c.lon];}));
-      fitAll();
-      try {                                       // pas de déplacement ni de dézoom vers les zones sans station
-        var lim = BOUNDS.pad(0.3);
-        map.setMaxBounds(lim); map.options.maxBoundsViscosity = 1.0; map.setMinZoom(map.getBoundsZoom(lim, true));
-      } catch (e) {}
       inited = true;
-      map.on('zoomend', function(){ var nd = wantDens(); if (nd !== curD) refresh(); else layout(); });
-      layout(); setTimeout(layout, 400);
+      fitAll();
+      map.on('zoomend', onView); map.on('moveend', onView);
+      refresh(); setTimeout(refresh, 400);
     } else {                                  // repli sans fond de carte (Leaflet indisponible)
       el.classList.add('fb');
       var la = D.communes.map(function(c){return c.lat;}), lo = D.communes.map(function(c){return c.lon;});
@@ -1273,7 +1344,7 @@ th.n.clk{cursor:pointer}th.n.clk:hover{color:var(--acc);text-decoration:underlin
       });
       var n = document.createElement('div'); n.className='fbnote';
       n.textContent = 'Carte simplifiée : fond de carte indisponible'; el.appendChild(n);
-      inited = true; layout();
+      inited = true; refresh();
     }
   }
   function refresh(){
@@ -1290,8 +1361,7 @@ th.n.clk{cursor:pointer}th.n.clk:hover{color:var(--acc);text-decoration:underlin
     document.querySelectorAll('.tabs button[data-v]').forEach(function(b){b.classList.toggle('on', b.dataset.v===v);});
     ['tsep','mapbar','mapctl'].forEach(function(id){ $('#'+id).hidden = (v !== 'carte'); });
     document.body.classList.toggle('vue-carte', v === 'carte');
-    if (v !== 'carte') document.body.classList.remove('mapfs');
-    if (v === 'carte') { init(); if (map) map.invalidateSize(); }
+    if (v === 'carte') { sizeMap(); init(); if (map) { map.invalidateSize(); refresh(); } }
     try { history.replaceState(null, '', v==='carte' ? '#carte' : location.pathname+location.search); } catch(e) {}
   }
   document.querySelectorAll('.tabs button[data-v]').forEach(function(b){b.onclick=function(){view(b.dataset.v);};});
@@ -1456,7 +1526,7 @@ th.n.clk{cursor:pointer}th.n.clk:hover{color:var(--acc);text-decoration:underlin
   $('#atmo').onclick = function(e){ if (e.target === this) closeAtmo(); };
   document.addEventListener('keydown', function(e){
     if (e.key !== 'Escape') return;
-    if (!$('#atmo').hidden) closeAtmo(); else if (document.body.classList.contains('mapfs')) toggleFs();
+    if (!$('#atmo').hidden) closeAtmo();
   });
   document.querySelectorAll('#vue-tableau th.clk').forEach(function(th){
     var i = D.communes.findIndex(function(c){ return c.name === th.dataset.n; });
@@ -1469,21 +1539,17 @@ th.n.clk{cursor:pointer}th.n.clk:hover{color:var(--acc);text-decoration:underlin
       mode = +b.dataset.m; refresh();
     };
   });
-  function toggleFs(){
-    var on = document.body.classList.toggle('mapfs');
-    $('#b-fs').textContent = on ? 'Quitter le plein écran' : 'Plein écran';
-    setTimeout(function(){ if (map) map.invalidateSize(); layout(); }, 80);
-  }
-  $('#b-fs').onclick = toggleFs;
-  $('#b-fit').onclick = function(){ fitAll(); layout(); };
+  $('#b-fit').onclick = function(){ fitAll(); refresh(); };
   $('#b-dens').onclick = function(){
     pref = pref === 'auto' ? 'compact' : pref === 'compact' ? 'full' : 'auto';
     this.textContent = 'Cadres : ' + (pref === 'auto' ? 'auto' : pref === 'compact' ? 'compacts' : 'détaillés');
     refresh();
   };
-  window.addEventListener('resize', function(){ if (inited) { if (map) map.invalidateSize(); layout(); } });
+  window.addEventListener('resize', sizeMap);
+  var lgm = $('.logo-map'); if (lgm) lgm.addEventListener('load', sizeMap);
   var h0 = location.hash;
   view(h0 === '#carte' || h0 === '#bulletin' ? 'carte' : 'tableau');
+  window.addEventListener('hashchange', function(){ view(location.hash === '#carte' ? 'carte' : 'tableau'); });
 })();
 </script>
 """
@@ -1572,7 +1638,7 @@ def render(rows, d, generated):
             f'<td class="x g">{wind_cell(r["gmax"], r["gmax_dir"])}</td></tr>')
     tabs = TABS
     mapctl = MAPCTL
-    carte = MAP_TEMPLATE.replace("__DATA__", map_payload(rows, d)).replace("__BULLETIN__", bulletin_du_jour(rows, d))
+    carte = MAP_TEMPLATE.replace("__DATA__", map_payload(rows, d)).replace("__BULLETIN__", bulletin_du_jour(rows, d)).replace("__EDITE__", generated)
     titre = f"{JOURS[d.weekday()].capitalize()} {d.day} {MOIS[d.month-1]} {d.year}"
     return f"""<!DOCTYPE html>
 <html lang="fr"><head><meta charset="utf-8">
